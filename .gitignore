@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+# Local database cluster and uploaded files (development only)
+.data
+storage

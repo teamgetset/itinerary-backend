@@ -1,0 +1,2370 @@
+{
+  "_note": "DEMO CONTENT for development and review. Branch contacts and testimonials are real (teamgetset.com, Google reviews). Malaysia and Singapore AED adult prices come from teamgetset.com; every other price, all child/infant rates, all second-currency prices and the sample timeline times are illustrative. Replace through the admin before launch.",
+  "currencies": [
+    {
+      "code": "INR",
+      "symbol": "₹",
+      "name": "Indian rupee",
+      "locale": "en-IN",
+      "displayOrder": 0
+    },
+    {
+      "code": "AED",
+      "symbol": "د.إ",
+      "name": "UAE dirham",
+      "locale": "en-AE",
+      "displayOrder": 1
+    }
+  ],
+  "categories": [
+    "City break",
+    "Family",
+    "Culture",
+    "Road trip",
+    "Short break",
+    "Beach",
+    "Islands",
+    "Mountains",
+    "Honeymoon"
+  ],
+  "branches": [
+    {
+      "slug": "dubai",
+      "name": "Dubai",
+      "shortDescription": "Holidays from the UAE to Georgia, Azerbaijan, Türkiye, Southeast Asia and the Maldives.",
+      "description": "Our UAE office in Al Fahidi, a short walk from the Creek. Visas, flights and every holiday on this site.",
+      "banner": {
+        "file": "branches/dubai-banner.jpg",
+        "alt": "Dubai Marina skyscrapers glowing in golden light, seen from a boat",
+        "focalPoint": null
+      },
+      "thumbnail": {
+        "file": "branches/dubai.jpg",
+        "alt": "A sand-coloured lane with potted plants in Al Fahidi, old Dubai",
+        "focalPoint": null
+      },
+      "addressLines": [
+        "Office 1603, Fahidi Heights",
+        "Al Fahidi Street, Sharaf DG Metro exit 4",
+        "Dubai, UAE"
+      ],
+      "city": "Dubai",
+      "countryCode": "AE",
+      "countryName": "United Arab Emirates",
+      "airportCode": "DXB",
+      "airportCity": "Dubai",
+      "phone": "+971 58 568 9114",
+      "whatsapp": "971585689114",
+      "email": "info@teamgetset.com",
+      "mapUrl": "https://maps.google.com/?cid=7918922786561356044",
+      "displayOrder": 0
+    },
+    {
+      "slug": "calicut",
+      "name": "Calicut",
+      "shortDescription": "Dubai and UAE holidays from Kerala, plus Thailand and Bali.",
+      "description": "Our Kerala office on MN Road. Dubai and UAE holidays, international tours and visa help, close to home.",
+      "banner": {
+        "file": "branches/calicut-banner.jpg",
+        "alt": "White Kerala-style house among coconut palms reflected in a calm lake in Kozhikode",
+        "focalPoint": "40% 50%"
+      },
+      "thumbnail": {
+        "file": "branches/calicut.jpg",
+        "alt": "Aerial view of Kozhikode Beach and its seafront promenade",
+        "focalPoint": null
+      },
+      "addressLines": [
+        "MN Road, Pushpa Junction",
+        "Kozhikode, Kerala 673002",
+        "India"
+      ],
+      "city": "Kozhikode",
+      "countryCode": "IN",
+      "countryName": "India",
+      "airportCode": "CCJ",
+      "airportCity": "Calicut",
+      "phone": "+91 6282 860 728",
+      "whatsapp": null,
+      "email": null,
+      "mapUrl": "https://www.google.com/maps/search/?api=1&query=GETSET+Tours+and+Travels+Pushpa+Junction+Kozhikode",
+      "displayOrder": 1
+    }
+  ],
+  "destinations": [
+    {
+      "slug": "dubai",
+      "name": "Dubai",
+      "kind": "PLACE",
+      "countryCode": "AE",
+      "countryName": "United Arab Emirates",
+      "shortDescription": "Skyscrapers, souks and the desert, about four hours from Calicut.",
+      "hero": {
+        "file": "packages/dubai-city-highlights/dubai-marina-from-water.jpg",
+        "alt": "Dubai Marina skyscrapers glowing in golden light, seen from a boat",
+        "focalPoint": null
+      },
+      "facts": [
+        {
+          "label": "Best time",
+          "value": "November to March"
+        },
+        {
+          "label": "Flight from Calicut",
+          "value": "About 4 hours"
+        },
+        {
+          "label": "Currency",
+          "value": "UAE dirham (AED)"
+        },
+        {
+          "label": "Visa",
+          "value": "We arrange UAE visit visas for most passports."
+        }
+      ],
+      "displayOrder": 0,
+      "experiences": [
+        {
+          "name": "Dhow cruise dinner at Al Seef",
+          "prices": {
+            "AED": 60,
+            "INR": 1400
+          }
+        },
+        {
+          "name": "Dubai Miracle Garden",
+          "prices": {
+            "AED": 64,
+            "INR": 1500
+          }
+        },
+        {
+          "name": "Dubai Butterfly Garden",
+          "prices": {
+            "AED": 64,
+            "INR": 1500
+          }
+        },
+        {
+          "name": "Museum of Illusions",
+          "prices": {
+            "AED": 100,
+            "INR": 2300
+          }
+        },
+        {
+          "name": "IMG Worlds of Adventure",
+          "prices": {
+            "AED": 180,
+            "INR": 4100
+          }
+        },
+        {
+          "name": "Skydive Dubai, Palm drop zone",
+          "prices": {
+            "AED": 2090,
+            "INR": 48100
+          }
+        }
+      ]
+    },
+    {
+      "slug": "uae",
+      "name": "UAE",
+      "kind": "COUNTRY",
+      "countryCode": "AE",
+      "countryName": "United Arab Emirates",
+      "shortDescription": "Seven emirates, from mountain roads to museum islands.",
+      "hero": {
+        "file": "packages/uae-seven-emirates/liwa-oasis-dunes.jpg",
+        "alt": "A date palm oasis among golden dunes in the Liwa desert",
+        "focalPoint": null
+      },
+      "facts": [
+        {
+          "label": "Best time",
+          "value": "November to March"
+        },
+        {
+          "label": "Flight from Calicut",
+          "value": "About 4 hours"
+        },
+        {
+          "label": "Currency",
+          "value": "UAE dirham (AED)"
+        },
+        {
+          "label": "Getting around",
+          "value": "Private car between emirates, arranged by us."
+        }
+      ],
+      "displayOrder": 1,
+      "experiences": [
+        {
+          "name": "The National Aquarium, Abu Dhabi",
+          "prices": {
+            "AED": 130,
+            "INR": 3000
+          }
+        },
+        {
+          "name": "teamLab Phenomena Abu Dhabi",
+          "prices": {
+            "AED": 130,
+            "INR": 3000
+          }
+        },
+        {
+          "name": "Yellow Boats tour, Abu Dhabi",
+          "prices": {
+            "AED": 150,
+            "INR": 3500
+          }
+        },
+        {
+          "name": "Yas Waterworld",
+          "prices": {
+            "AED": 260,
+            "INR": 6000
+          }
+        }
+      ]
+    },
+    {
+      "slug": "malaysia",
+      "name": "Malaysia",
+      "kind": "COUNTRY",
+      "countryCode": "MY",
+      "countryName": "Malaysia",
+      "shortDescription": "City towers, limestone caves and cool highland air.",
+      "hero": {
+        "file": "packages/malaysia/cover.jpg",
+        "alt": "Petronas Twin Towers lit at dusk above KLCC Park and the Kuala Lumpur skyline",
+        "focalPoint": "center 20%"
+      },
+      "facts": [
+        {
+          "label": "Flight from Dubai",
+          "value": "About 7 hours"
+        },
+        {
+          "label": "Time difference",
+          "value": "4 hours ahead of the UAE"
+        },
+        {
+          "label": "Currency",
+          "value": "Malaysian ringgit (MYR)"
+        },
+        {
+          "label": "Visa",
+          "value": "Depends on your passport. Our visa desk checks it for you."
+        }
+      ],
+      "displayOrder": 2,
+      "experiences": []
+    },
+    {
+      "slug": "singapore",
+      "name": "Singapore",
+      "kind": "COUNTRY",
+      "countryCode": "SG",
+      "countryName": "Singapore",
+      "shortDescription": "Gardens, food and skyline in one compact city.",
+      "hero": {
+        "file": "packages/singapore/cover.jpg",
+        "alt": "Marina Bay Sands and the ArtScience Museum reflected in Marina Bay at blue hour",
+        "focalPoint": null
+      },
+      "facts": [
+        {
+          "label": "Flight from Dubai",
+          "value": "About 7 hours"
+        },
+        {
+          "label": "Time difference",
+          "value": "4 hours ahead of the UAE"
+        },
+        {
+          "label": "Currency",
+          "value": "Singapore dollar (SGD)"
+        },
+        {
+          "label": "Visa",
+          "value": "Depends on your passport. Our visa desk checks it for you."
+        }
+      ],
+      "displayOrder": 3,
+      "experiences": []
+    },
+    {
+      "slug": "thailand",
+      "name": "Thailand",
+      "kind": "COUNTRY",
+      "countryCode": "TH",
+      "countryName": "Thailand",
+      "shortDescription": "Islands, long-tail boats and limestone cliffs.",
+      "hero": {
+        "file": "packages/thailand/cover.jpg",
+        "alt": "A garlanded long-tail boat heading into turquoise Maya Bay between limestone cliffs",
+        "focalPoint": "center 75%"
+      },
+      "facts": [
+        {
+          "label": "Flights from Calicut",
+          "value": "One stop, usually via Kuala Lumpur or Bangkok. We book the connection."
+        },
+        {
+          "label": "Time difference",
+          "value": "1.5 hours ahead of India"
+        },
+        {
+          "label": "Currency",
+          "value": "Thai baht (THB)"
+        },
+        {
+          "label": "Visa",
+          "value": "Depends on your passport. Our visa desk checks it for you."
+        }
+      ],
+      "displayOrder": 4,
+      "experiences": []
+    },
+    {
+      "slug": "bali",
+      "name": "Bali",
+      "kind": "PLACE",
+      "countryCode": "ID",
+      "countryName": "Indonesia",
+      "shortDescription": "Temples, rice terraces and clifftop sunsets.",
+      "hero": {
+        "file": "packages/bali/cover.jpg",
+        "alt": "Pura Ulun Danu Bratan shrines on Lake Bratan under a blue sky",
+        "focalPoint": "center 25%"
+      },
+      "facts": [
+        {
+          "label": "Flights from Calicut",
+          "value": "One stop, usually via Kuala Lumpur or Singapore. We book the connection."
+        },
+        {
+          "label": "Time difference",
+          "value": "2.5 hours ahead of India"
+        },
+        {
+          "label": "Currency",
+          "value": "Indonesian rupiah (IDR)"
+        },
+        {
+          "label": "Visa",
+          "value": "Depends on your passport. Our visa desk checks it for you."
+        }
+      ],
+      "displayOrder": 5,
+      "experiences": []
+    },
+    {
+      "slug": "georgia",
+      "name": "Georgia",
+      "kind": "COUNTRY",
+      "countryCode": "GE",
+      "countryName": "Georgia",
+      "shortDescription": "Caucasus peaks and an old town full of wine bars.",
+      "hero": {
+        "file": "packages/georgia/cover.jpg",
+        "alt": "Gergeti Trinity Church on a green ridge below the snowy Kazbek peaks",
+        "focalPoint": "center 72%"
+      },
+      "facts": [
+        {
+          "label": "Flight from Dubai",
+          "value": "About 3 hours"
+        },
+        {
+          "label": "Time difference",
+          "value": "Same time as the UAE"
+        },
+        {
+          "label": "Currency",
+          "value": "Georgian lari (GEL)"
+        },
+        {
+          "label": "Visa",
+          "value": "Depends on your passport. Our visa desk checks it for you."
+        }
+      ],
+      "displayOrder": 6,
+      "experiences": []
+    },
+    {
+      "slug": "azerbaijan",
+      "name": "Azerbaijan",
+      "kind": "COUNTRY",
+      "countryCode": "AZ",
+      "countryName": "Azerbaijan",
+      "shortDescription": "A walled old city, bold architecture and green mountains.",
+      "hero": {
+        "file": "packages/azerbaijan/cover.jpg",
+        "alt": "Baku's three Flame Towers glowing at dusk above the city",
+        "focalPoint": null
+      },
+      "facts": [
+        {
+          "label": "Flight from Dubai",
+          "value": "About 3 hours"
+        },
+        {
+          "label": "Time difference",
+          "value": "Same time as the UAE"
+        },
+        {
+          "label": "Currency",
+          "value": "Azerbaijani manat (AZN)"
+        },
+        {
+          "label": "Visa",
+          "value": "Depends on your passport. Our visa desk checks it for you."
+        }
+      ],
+      "displayOrder": 7,
+      "experiences": []
+    },
+    {
+      "slug": "turkey",
+      "name": "Turkey",
+      "kind": "COUNTRY",
+      "countryCode": "TR",
+      "countryName": "Türkiye",
+      "shortDescription": "Byzantine domes, bazaars and balloons at sunrise.",
+      "hero": {
+        "file": "packages/turkey/cover.jpg",
+        "alt": "Hot-air balloons drifting over Cappadocia's fairy chimneys at sunrise",
+        "focalPoint": null
+      },
+      "facts": [
+        {
+          "label": "Flight from Dubai",
+          "value": "About 5 hours to Istanbul"
+        },
+        {
+          "label": "Time difference",
+          "value": "1 hour behind the UAE"
+        },
+        {
+          "label": "Currency",
+          "value": "Turkish lira (TRY)"
+        },
+        {
+          "label": "Visa",
+          "value": "Depends on your passport. Our visa desk checks it for you."
+        }
+      ],
+      "displayOrder": 8,
+      "experiences": []
+    },
+    {
+      "slug": "maldives",
+      "name": "Maldives",
+      "kind": "COUNTRY",
+      "countryCode": "MV",
+      "countryName": "Maldives",
+      "shortDescription": "Water villas, house reefs and very little to plan.",
+      "hero": {
+        "file": "packages/maldives/cover.jpg",
+        "alt": "Thatched overwater villa with a private pool over a turquoise lagoon",
+        "focalPoint": null
+      },
+      "facts": [
+        {
+          "label": "Flight from Dubai",
+          "value": "About 4 hours"
+        },
+        {
+          "label": "Time difference",
+          "value": "1 hour ahead of the UAE"
+        },
+        {
+          "label": "Currency",
+          "value": "US dollars are used at resorts"
+        },
+        {
+          "label": "Visa",
+          "value": "Free 30-day visa on arrival for every nationality."
+        }
+      ],
+      "displayOrder": 9,
+      "experiences": []
+    }
+  ],
+  "packages": [
+    {
+      "slug": "dubai-city-highlights",
+      "branch": "calicut",
+      "destination": "dubai",
+      "category": "City break",
+      "title": "Dubai City Highlights",
+      "shortDescription": "The Burj Khalifa, the desert and old Dubai in five unhurried days.",
+      "description": "The trip we recommend for a first visit. You see the Dubai everyone pictures, from the 124th floor of the Burj Khalifa to the dunes at sunset, and the older city along the Creek that many visitors miss.\n\nDays are paced so you are never rushing, with a free day for shopping or the beach. Hotels are four-star and central, and every transfer is private.",
+      "durationDays": 5,
+      "durationNights": 4,
+      "bestTime": "November to March",
+      "arrivalAirportCode": "DXB",
+      "arrivalCity": "Dubai",
+      "hero": {
+        "file": "packages/dubai-city-highlights/cover.jpg",
+        "alt": "Burj Khalifa rising above Downtown Dubai skyscrapers and a highway interchange in soft golden light",
+        "focalPoint": "center 25%"
+      },
+      "gallery": [
+        {
+          "file": "packages/dubai-city-highlights/desert-safari-4x4-dunes.jpg",
+          "alt": "White 4x4 cresting an orange sand dune on a UAE desert safari",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/dubai-city-highlights/dubai-marina-from-water.jpg",
+          "alt": "Dubai Marina skyscrapers glowing in golden light, seen from a boat",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/dubai-city-highlights/museum-of-the-future.jpg",
+          "alt": "The Museum of the Future's calligraphy-covered steel ring",
+          "focalPoint": null
+        }
+      ],
+      "keywords": [
+        "first visit",
+        "city",
+        "burj khalifa",
+        "desert safari",
+        "shopping",
+        "uae"
+      ],
+      "highlights": [
+        "At the Top, Burj Khalifa, levels 124 and 125",
+        "Evening desert safari with a dune drive and barbecue dinner",
+        "Dhow cruise dinner on Dubai Marina",
+        "Al Fahidi, an abra across the Creek and the gold and spice souks",
+        "A free day for the beach, the malls or the Museum of the Future"
+      ],
+      "itinerary": [
+        {
+          "title": "Arrive in Dubai",
+          "description": "Our driver meets you at Dubai International and takes you to your hotel. The evening is yours; the Dubai Fountain show at the foot of the Burj Khalifa is a good first stop.",
+          "stay": "Dubai",
+          "meals": [],
+          "activities": [
+            {
+              "time": null,
+              "title": "Meet our driver at Dubai International",
+              "type": "ARRIVAL",
+              "location": "DXB arrivals"
+            },
+            {
+              "time": null,
+              "title": "Private transfer and hotel check-in",
+              "type": "CHECK_IN"
+            },
+            {
+              "time": "20:00",
+              "title": "Dubai Fountain show, if you feel like it",
+              "type": "FREE_TIME",
+              "location": "Downtown Dubai"
+            }
+          ]
+        },
+        {
+          "title": "Old and new Dubai",
+          "description": "A guided city tour through Al Fahidi's wind-tower lanes, an abra ride across the Creek, the spice and gold souks, Jumeirah Mosque and a photo stop at the Burj Al Arab. Late afternoon, you go up to At the Top, Burj Khalifa.",
+          "stay": "Dubai",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": [
+            {
+              "time": "09:00",
+              "title": "Pickup from your hotel",
+              "type": "TRANSFER"
+            },
+            {
+              "time": "09:30",
+              "title": "Al Fahidi and an abra across the Creek",
+              "type": "SIGHTSEEING",
+              "location": "Bur Dubai"
+            },
+            {
+              "time": "11:00",
+              "title": "Gold and spice souks",
+              "type": "SIGHTSEEING",
+              "location": "Deira"
+            },
+            {
+              "time": "12:30",
+              "title": "Jumeirah Mosque and Burj Al Arab photo stop",
+              "type": "SIGHTSEEING",
+              "location": "Jumeirah"
+            },
+            {
+              "time": "16:30",
+              "title": "At the Top, Burj Khalifa",
+              "type": "ACTIVITY",
+              "location": "Downtown Dubai"
+            }
+          ]
+        },
+        {
+          "title": "Desert safari",
+          "description": "A slow morning, then pickup at around 3 pm. Dune driving in a 4x4, a sunset stop on the sand and a barbecue dinner at a desert camp with live shows.",
+          "stay": "Dubai",
+          "meals": [
+            "BREAKFAST",
+            "DINNER"
+          ],
+          "activities": [
+            {
+              "time": "15:00",
+              "title": "Desert safari pickup",
+              "type": "TRANSFER"
+            },
+            {
+              "time": "16:30",
+              "title": "Dune drive in a 4x4",
+              "type": "ACTIVITY",
+              "location": "Lahbab desert"
+            },
+            {
+              "time": "18:00",
+              "title": "Sunset stop on the dunes",
+              "type": "SIGHTSEEING"
+            },
+            {
+              "time": "19:30",
+              "title": "Barbecue dinner and live shows at camp",
+              "type": "MEAL"
+            }
+          ]
+        },
+        {
+          "title": "Free day and a dhow cruise",
+          "description": "Spend the day at the beach, in the malls or at the Museum of the Future. In the evening, a two-hour dhow cruise along Dubai Marina with a buffet dinner.",
+          "stay": "Dubai",
+          "meals": [
+            "BREAKFAST",
+            "DINNER"
+          ],
+          "activities": [
+            {
+              "time": "20:00",
+              "title": "Dhow cruise with buffet dinner",
+              "type": "MEAL",
+              "location": "Dubai Marina"
+            }
+          ]
+        },
+        {
+          "title": "Departure",
+          "description": "Check out and transfer to the airport for your flight home.",
+          "stay": null,
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": [
+            {
+              "time": null,
+              "title": "Check out and private transfer to the airport",
+              "type": "DEPARTURE"
+            }
+          ]
+        }
+      ],
+      "inclusions": [
+        "4 nights in a 4-star hotel with breakfast",
+        "Private airport transfers",
+        "Half-day Dubai city tour with a guide",
+        "At the Top, Burj Khalifa tickets",
+        "Desert safari with barbecue dinner",
+        "Dhow cruise dinner at Dubai Marina"
+      ],
+      "exclusions": [
+        "Flights",
+        "UAE visa fee",
+        "Tourism Dirham fee charged by hotels",
+        "Lunches and personal expenses",
+        "Travel insurance"
+      ],
+      "prices": {
+        "ADULT": {
+          "INR": 26900,
+          "AED": 1170
+        },
+        "CHILD": {
+          "INR": 20200,
+          "AED": 880
+        },
+        "INFANT": {
+          "INR": 2700,
+          "AED": 115
+        }
+      },
+      "isFeatured": true,
+      "displayOrder": 0
+    },
+    {
+      "slug": "dubai-family-escape",
+      "branch": "calicut",
+      "destination": "dubai",
+      "category": "Family",
+      "title": "Dubai Family Escape",
+      "shortDescription": "Waterparks, aquariums and theme parks, with easy days in between.",
+      "description": "Built around children's energy levels. Big days at Atlantis Aquaventure and IMG Worlds of Adventure alternate with easier ones, so nobody hits a wall by day three.\n\nYou stay in a family room at a four-star beach hotel, and our driver handles every transfer. Child seats are available on request.",
+      "durationDays": 6,
+      "durationNights": 5,
+      "bestTime": "October to April",
+      "arrivalAirportCode": "DXB",
+      "arrivalCity": "Dubai",
+      "hero": {
+        "file": "packages/dubai-family-escape/cover.jpg",
+        "alt": "Atlantis The Palm and its beach on Palm Jumeirah under a clear sky",
+        "focalPoint": null
+      },
+      "gallery": [
+        {
+          "file": "packages/dubai-family-escape/dubai-fountain-night.jpg",
+          "alt": "The Dubai Fountain show at night with the Burj Khalifa lit up beside it",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/dubai-family-escape/miracle-garden-flowers.jpg",
+          "alt": "Elephant topiary and a flower-covered castle at Dubai Miracle Garden",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/dubai-family-escape/dubai-creek-dhows-abras.jpg",
+          "alt": "Wooden dhows and abra water taxis on Dubai Creek beside old Dubai",
+          "focalPoint": null
+        }
+      ],
+      "keywords": [
+        "family",
+        "kids",
+        "theme parks",
+        "waterpark",
+        "atlantis",
+        "aquarium",
+        "uae"
+      ],
+      "highlights": [
+        "A full day at Atlantis Aquaventure waterpark",
+        "IMG Worlds of Adventure, a giant indoor theme park",
+        "Dubai Aquarium and Underwater Zoo",
+        "Dubai Miracle Garden, in season",
+        "A family-friendly desert safari with camel rides"
+      ],
+      "itinerary": [
+        {
+          "title": "Arrive and settle in",
+          "description": "Private transfer to your beach hotel. Rest after the flight, then an easy evening walk along the beach at JBR.",
+          "stay": "Dubai",
+          "meals": [],
+          "activities": []
+        },
+        {
+          "title": "Atlantis Aquaventure",
+          "description": "A full day at the waterpark on Palm Jumeirah, with slides, lazy rivers and a private beach. The Lost Chambers Aquarium is next door if anyone has energy left.",
+          "stay": "Dubai",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Aquarium and city sights",
+          "description": "Morning at Dubai Aquarium and Underwater Zoo inside Dubai Mall, then a gentle city tour with photo stops at the Dubai Frame and Jumeirah Beach. Evening at the Dubai Fountain.",
+          "stay": "Dubai",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "IMG Worlds of Adventure",
+          "description": "A full day of indoor rides themed on Marvel and Cartoon Network, all air-conditioned. Back at the hotel by early evening.",
+          "stay": "Dubai",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Gardens and the desert",
+          "description": "Morning at Dubai Miracle Garden while it is in season, then an afternoon desert safari with a gentler dune drive, camel rides and a barbecue dinner.",
+          "stay": "Dubai",
+          "meals": [
+            "BREAKFAST",
+            "DINNER"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Departure",
+          "description": "Check out and transfer to the airport for your flight home.",
+          "stay": null,
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        }
+      ],
+      "inclusions": [
+        "5 nights in a family room at a 4-star beach hotel, with breakfast",
+        "Private transfers throughout, child seats on request",
+        "Atlantis Aquaventure tickets",
+        "IMG Worlds of Adventure tickets",
+        "Dubai Aquarium and Underwater Zoo tickets",
+        "Desert safari with barbecue dinner",
+        "Dubai Miracle Garden tickets, in season"
+      ],
+      "exclusions": [
+        "Flights",
+        "UAE visa fees",
+        "Tourism Dirham fee charged by hotels",
+        "Meals not listed",
+        "Travel insurance"
+      ],
+      "prices": {
+        "ADULT": {
+          "INR": 41500,
+          "AED": 1805
+        },
+        "CHILD": {
+          "INR": 31100,
+          "AED": 1355
+        },
+        "INFANT": {
+          "INR": 4200,
+          "AED": 180
+        }
+      },
+      "isFeatured": false,
+      "displayOrder": 1
+    },
+    {
+      "slug": "abu-dhabi-and-dubai",
+      "branch": "calicut",
+      "destination": "uae",
+      "category": "Culture",
+      "title": "Abu Dhabi & Dubai",
+      "shortDescription": "The Grand Mosque, the Louvre and Yas Island, then three nights in Dubai.",
+      "description": "Two cities, one trip. You start with two nights in Abu Dhabi for its museums and the Sheikh Zayed Grand Mosque, then move to Dubai for the skyline, the souks and the desert.\n\nThe drive between them takes about 90 minutes and we handle it, so the only decision left is Ferrari World or Warner Bros. World on Yas Island.",
+      "durationDays": 6,
+      "durationNights": 5,
+      "bestTime": "November to March",
+      "arrivalAirportCode": "AUH",
+      "arrivalCity": "Abu Dhabi",
+      "hero": {
+        "file": "packages/abu-dhabi-and-dubai/cover.jpg",
+        "alt": "Sheikh Zayed Grand Mosque lit up and reflected in water at dusk",
+        "focalPoint": "center 15%"
+      },
+      "gallery": [
+        {
+          "file": "packages/abu-dhabi-and-dubai/louvre-abu-dhabi-dome.jpg",
+          "alt": "The Louvre Abu Dhabi's latticed dome over white museum buildings set in the sea",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/abu-dhabi-and-dubai/qasr-al-watan-interior.jpg",
+          "alt": "Ornate gold and white domed hall inside Qasr Al Watan palace",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/abu-dhabi-and-dubai/abu-dhabi-skyline-night.jpg",
+          "alt": "The Abu Dhabi Corniche skyline lit up at night across the water",
+          "focalPoint": null
+        }
+      ],
+      "keywords": [
+        "abu dhabi",
+        "louvre",
+        "grand mosque",
+        "ferrari world",
+        "yas island",
+        "culture",
+        "uae"
+      ],
+      "highlights": [
+        "Sheikh Zayed Grand Mosque",
+        "Louvre Abu Dhabi on Saadiyat Island",
+        "Qasr Al Watan presidential palace",
+        "Ferrari World or Warner Bros. World on Yas Island",
+        "Dubai city tour and At the Top, Burj Khalifa",
+        "Desert safari with barbecue dinner"
+      ],
+      "itinerary": [
+        {
+          "title": "Arrive in Abu Dhabi",
+          "description": "Private transfer from Abu Dhabi airport to your hotel. The evening is free for a walk along the Corniche.",
+          "stay": "Abu Dhabi",
+          "meals": [],
+          "activities": []
+        },
+        {
+          "title": "Mosque, palace and the Louvre",
+          "description": "Morning at the Sheikh Zayed Grand Mosque and Qasr Al Watan, afternoon at the Louvre Abu Dhabi. Modest dress is required at the mosque; we send the guidance before you travel.",
+          "stay": "Abu Dhabi",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Yas Island, then Dubai",
+          "description": "A day at Ferrari World or Warner Bros. World, then a private transfer to your hotel in Dubai in the evening.",
+          "stay": "Dubai",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Dubai city tour",
+          "description": "Al Fahidi, an abra across the Creek, the souks, Jumeirah Mosque and the Burj Al Arab, finishing at At the Top, Burj Khalifa.",
+          "stay": "Dubai",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Desert safari",
+          "description": "A free morning, then afternoon pickup for dune driving, sunset in the desert and a barbecue dinner at camp.",
+          "stay": "Dubai",
+          "meals": [
+            "BREAKFAST",
+            "DINNER"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Departure",
+          "description": "Transfer to Dubai International for your flight home.",
+          "stay": null,
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        }
+      ],
+      "inclusions": [
+        "2 nights in Abu Dhabi and 3 nights in Dubai, 4-star hotels with breakfast",
+        "Private transfers, including Abu Dhabi to Dubai",
+        "Guided Abu Dhabi tour with the Grand Mosque and Qasr Al Watan",
+        "Louvre Abu Dhabi tickets",
+        "Ferrari World or Warner Bros. World tickets",
+        "Half-day Dubai city tour and At the Top, Burj Khalifa",
+        "Desert safari with barbecue dinner"
+      ],
+      "exclusions": [
+        "Flights",
+        "UAE visa fees",
+        "Tourism fees charged by hotels",
+        "Meals not listed",
+        "Travel insurance"
+      ],
+      "prices": {
+        "ADULT": {
+          "INR": 42900,
+          "AED": 1865
+        },
+        "CHILD": {
+          "INR": 32200,
+          "AED": 1400
+        },
+        "INFANT": {
+          "INR": 4300,
+          "AED": 185
+        }
+      },
+      "isFeatured": false,
+      "displayOrder": 2
+    },
+    {
+      "slug": "uae-seven-emirates",
+      "branch": "calicut",
+      "destination": "uae",
+      "category": "Road trip",
+      "title": "Seven Emirates Discovery",
+      "shortDescription": "Every emirate in one week, from Jebel Jais to the east coast.",
+      "description": "Most visitors see two emirates. This trip covers all seven by private car, with nights in Dubai, Ras Al Khaimah, Fujairah and Abu Dhabi.\n\nExpect the country's quieter side: the mountain road up Jebel Jais, the old mosque at Al Bidyah, Sharjah's heritage quarter and the beaches of the east coast.",
+      "durationDays": 7,
+      "durationNights": 6,
+      "bestTime": "November to March",
+      "arrivalAirportCode": "DXB",
+      "arrivalCity": "Dubai",
+      "hero": {
+        "file": "packages/uae-seven-emirates/cover.jpg",
+        "alt": "The winding mountain road on Jebel Jais in Ras Al Khaimah",
+        "focalPoint": null
+      },
+      "gallery": [
+        {
+          "file": "packages/uae-seven-emirates/fujairah-coast-boats.jpg",
+          "alt": "Fishing boats moored off a sandy beach in a Fujairah village",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/uae-seven-emirates/sharjah-mosque-dusk.jpg",
+          "alt": "A Sharjah mosque glowing at dusk among high-rise towers",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/uae-seven-emirates/liwa-oasis-dunes.jpg",
+          "alt": "A date palm oasis among golden dunes in the Liwa desert",
+          "focalPoint": null
+        }
+      ],
+      "keywords": [
+        "road trip",
+        "mountains",
+        "ras al khaimah",
+        "fujairah",
+        "sharjah",
+        "jebel jais",
+        "all emirates",
+        "uae"
+      ],
+      "highlights": [
+        "Jebel Jais, the UAE's highest peak",
+        "Al Bidyah Mosque and the Fujairah coast",
+        "Sharjah's Heritage Area and Al Noor Island",
+        "Ajman and Umm Al Quwain on the drive north",
+        "Sheikh Zayed Grand Mosque at sunset",
+        "Dubai city tour and desert safari"
+      ],
+      "itinerary": [
+        {
+          "title": "Arrive in Dubai",
+          "description": "Private transfer to your hotel and a free evening to settle in.",
+          "stay": "Dubai",
+          "meals": [],
+          "activities": []
+        },
+        {
+          "title": "Dubai city and desert",
+          "description": "Morning city tour of old and new Dubai, then an afternoon desert safari with a barbecue dinner at camp.",
+          "stay": "Dubai",
+          "meals": [
+            "BREAKFAST",
+            "DINNER"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Sharjah, Ajman and Umm Al Quwain",
+          "description": "Drive north through Sharjah's Heritage Area and Al Noor Island, stop on Ajman's corniche and at the Umm Al Quwain mangroves, and reach Ras Al Khaimah by evening.",
+          "stay": "Ras Al Khaimah",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Jebel Jais",
+          "description": "Up the mountain road to the UAE's highest peak for the viewpoints and cooler air. The Jebel Jais Flight zipline is optional and booked in advance.",
+          "stay": "Ras Al Khaimah",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "The east coast",
+          "description": "Cross the Hajar Mountains to Dibba and Al Bidyah Mosque, the oldest in the country, then snorkel off Snoopy Island before checking in by the beach.",
+          "stay": "Fujairah",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Fujairah to Abu Dhabi",
+          "description": "Morning at Fujairah Fort, then the drive west to Abu Dhabi, arriving in time for the Sheikh Zayed Grand Mosque at sunset.",
+          "stay": "Abu Dhabi",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Departure",
+          "description": "Transfer to Abu Dhabi or Dubai airport for your flight home.",
+          "stay": null,
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        }
+      ],
+      "inclusions": [
+        "6 nights in 4-star hotels with breakfast",
+        "Private car and driver for the whole trip",
+        "Dubai city tour and desert safari with barbecue dinner",
+        "Snorkelling trip at Snoopy Island with equipment",
+        "Guided visits in Sharjah and Abu Dhabi"
+      ],
+      "exclusions": [
+        "Flights",
+        "UAE visa fees",
+        "Jebel Jais Flight zipline",
+        "Tourism fees charged by hotels",
+        "Travel insurance"
+      ],
+      "prices": {
+        "ADULT": {
+          "INR": 54500,
+          "AED": 2370
+        },
+        "CHILD": {
+          "INR": 40900,
+          "AED": 1780
+        },
+        "INFANT": {
+          "INR": 5500,
+          "AED": 235
+        }
+      },
+      "isFeatured": false,
+      "displayOrder": 3
+    },
+    {
+      "slug": "malaysia",
+      "branch": "dubai",
+      "destination": "malaysia",
+      "category": "Short break",
+      "title": "Malaysia Getaway",
+      "shortDescription": "Kuala Lumpur's towers, the Batu Caves and a day in the Genting Highlands.",
+      "description": "A short trip that still feels full: three nights in Kuala Lumpur, the city's landmarks, the limestone Batu Caves and a cable car ride up to the cool Genting Highlands.\n\nIt fits a long weekend from Dubai and works just as well for families, couples or a first trip abroad.",
+      "durationDays": 4,
+      "durationNights": 3,
+      "bestTime": "December to February, and June to August",
+      "arrivalAirportCode": "KUL",
+      "arrivalCity": "Kuala Lumpur",
+      "hero": {
+        "file": "packages/malaysia/cover.jpg",
+        "alt": "Petronas Twin Towers lit at dusk above KLCC Park and the Kuala Lumpur skyline",
+        "focalPoint": "center 20%"
+      },
+      "gallery": [
+        {
+          "file": "packages/malaysia/batu-caves-murugan-statue.jpg",
+          "alt": "The golden Lord Murugan statue beside the rainbow staircase at Batu Caves",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/malaysia/genting-highlands-cable-car.jpg",
+          "alt": "Red cable cars gliding over rainforest toward the Genting Highlands",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/malaysia/putra-mosque-putrajaya.jpg",
+          "alt": "The pink-domed Putra Mosque on the shore of Putrajaya Lake",
+          "focalPoint": null
+        }
+      ],
+      "keywords": [
+        "kuala lumpur",
+        "genting",
+        "batu caves",
+        "petronas",
+        "family",
+        "short break",
+        "asia"
+      ],
+      "highlights": [
+        "Petronas Twin Towers and KLCC Park",
+        "Batu Caves and its 272 painted steps",
+        "Genting Highlands by Awana SkyWay cable car",
+        "Merdeka Square and the old colonial quarter",
+        "Evenings on Jalan Alor and in Bukit Bintang"
+      ],
+      "itinerary": [
+        {
+          "title": "Arrive in Kuala Lumpur",
+          "description": "Transfer from KLIA to your hotel near Bukit Bintang. The evening is free for the street food on Jalan Alor.",
+          "stay": "Kuala Lumpur",
+          "meals": [],
+          "activities": []
+        },
+        {
+          "title": "Kuala Lumpur city tour",
+          "description": "The King's Palace, the National Monument, Merdeka Square and a photo stop at the Petronas Twin Towers, then the Batu Caves in the afternoon.",
+          "stay": "Kuala Lumpur",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Genting Highlands",
+          "description": "A day in the hills, about an hour from the city. Ride the Awana SkyWay cable car, visit the Chin Swee Caves Temple and the theme parks at the top, and come back down by evening.",
+          "stay": "Kuala Lumpur",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Departure",
+          "description": "Transfer to KLIA for your flight home. With a late flight, we stop at Putrajaya's pink Putra Mosque, which is on the way.",
+          "stay": null,
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        }
+      ],
+      "inclusions": [
+        "3 nights in a 4-star hotel with breakfast",
+        "Return airport transfers",
+        "Half-day Kuala Lumpur city tour with the Batu Caves",
+        "Genting Highlands day trip with cable car tickets",
+        "Tours on a shared basis with English-speaking guides"
+      ],
+      "exclusions": [
+        "Flights",
+        "Malaysia visa, if your passport needs one",
+        "Malaysia tourism tax, paid at the hotel",
+        "Lunches and dinners",
+        "Travel insurance"
+      ],
+      "prices": {
+        "ADULT": {
+          "AED": 950,
+          "INR": 21900
+        },
+        "CHILD": {
+          "AED": 715,
+          "INR": 16400
+        },
+        "INFANT": {
+          "AED": 95,
+          "INR": 2200
+        }
+      },
+      "isFeatured": false,
+      "displayOrder": 4
+    },
+    {
+      "slug": "singapore",
+      "branch": "dubai",
+      "destination": "singapore",
+      "category": "City break",
+      "title": "Singapore City Break",
+      "shortDescription": "Gardens by the Bay, Sentosa and the Night Safari in one easy city.",
+      "description": "Singapore is compact, clean and easy to get around, which makes it ideal for a first trip abroad or a family break. This plan covers the essentials without a single rushed day.\n\nDay three is yours to shape: the beaches and cable car on Sentosa, or a full day at Universal Studios Singapore as an upgrade.",
+      "durationDays": 4,
+      "durationNights": 3,
+      "bestTime": "February to April",
+      "arrivalAirportCode": "SIN",
+      "arrivalCity": "Singapore",
+      "hero": {
+        "file": "packages/singapore/cover.jpg",
+        "alt": "Marina Bay Sands and the ArtScience Museum reflected in Marina Bay at blue hour",
+        "focalPoint": null
+      },
+      "gallery": [
+        {
+          "file": "packages/singapore/supertree-grove.jpg",
+          "alt": "The Supertree Grove and its skyway above Gardens by the Bay",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/singapore/sentosa-beach.jpg",
+          "alt": "A palm-lined Sentosa beach with islets offshore",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/singapore/buddha-tooth-relic-temple-chinatown.jpg",
+          "alt": "The Buddha Tooth Relic Temple in Chinatown lit up at night",
+          "focalPoint": null
+        }
+      ],
+      "keywords": [
+        "singapore",
+        "sentosa",
+        "universal studios",
+        "gardens by the bay",
+        "night safari",
+        "family",
+        "asia"
+      ],
+      "highlights": [
+        "Night Safari at Mandai Wildlife Reserve",
+        "Gardens by the Bay, the Flower Dome and Cloud Forest",
+        "Marina Bay, the Merlion and Chinatown",
+        "A day on Sentosa Island",
+        "The Garden Rhapsody light show at the Supertrees"
+      ],
+      "itinerary": [
+        {
+          "title": "Arrive and the Night Safari",
+          "description": "Transfer from Changi to your hotel. In the evening, the Night Safari tram ride and walking trails.",
+          "stay": "Singapore",
+          "meals": [],
+          "activities": []
+        },
+        {
+          "title": "City tour and Gardens by the Bay",
+          "description": "A morning city tour of the Merlion, the Civic District, Chinatown and Little India. Afternoon in the Flower Dome and Cloud Forest, staying on for the Garden Rhapsody light show.",
+          "stay": "Singapore",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Sentosa Island",
+          "description": "Cable car across to Sentosa for the beaches and the SkyHelix, and the Wings of Time show over the water at night. Universal Studios Singapore can replace the beach day.",
+          "stay": "Singapore",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Departure",
+          "description": "Transfer to Changi for your flight home.",
+          "stay": null,
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        }
+      ],
+      "inclusions": [
+        "3 nights in a 4-star hotel with breakfast",
+        "Return airport transfers",
+        "Half-day Singapore city tour",
+        "Night Safari tickets with tram ride",
+        "Flower Dome and Cloud Forest tickets",
+        "Sentosa cable car and Wings of Time tickets"
+      ],
+      "exclusions": [
+        "Flights",
+        "Singapore visa, if your passport needs one",
+        "Universal Studios Singapore, available as an upgrade",
+        "Lunches and dinners",
+        "Travel insurance"
+      ],
+      "prices": {
+        "ADULT": {
+          "AED": 995,
+          "INR": 22900
+        },
+        "CHILD": {
+          "AED": 745,
+          "INR": 17200
+        },
+        "INFANT": {
+          "AED": 100,
+          "INR": 2300
+        }
+      },
+      "isFeatured": false,
+      "displayOrder": 5
+    },
+    {
+      "slug": "thailand",
+      "branch": "calicut",
+      "destination": "thailand",
+      "category": "Beach",
+      "title": "Phuket & Krabi Islands",
+      "shortDescription": "Island-hopping on Thailand's Andaman coast, with nights in Phuket and Krabi.",
+      "description": "Turquoise water, limestone cliffs and long-tail boats. You split the week between Phuket and Krabi, with a speedboat day to the Phi Phi Islands and a boat trip through Phang Nga Bay.\n\nHotels are close to the beach, and there is free time in each place for doing nothing at all.",
+      "durationDays": 6,
+      "durationNights": 5,
+      "bestTime": "November to April",
+      "arrivalAirportCode": "HKT",
+      "arrivalCity": "Phuket",
+      "hero": {
+        "file": "packages/thailand/cover.jpg",
+        "alt": "A garlanded long-tail boat heading into turquoise Maya Bay between limestone cliffs",
+        "focalPoint": "center 75%"
+      },
+      "gallery": [
+        {
+          "file": "packages/thailand/phuket-big-buddha.jpg",
+          "alt": "Phuket's white marble Big Buddha overlooking the Andaman coast",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/thailand/railay-beach-krabi.jpg",
+          "alt": "Long-tail boats moored off Railay Beach beneath limestone cliffs in Krabi",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/thailand/james-bond-island.jpg",
+          "alt": "The Khao Tapu limestone pillar at James Bond Island in Phang Nga Bay",
+          "focalPoint": null
+        }
+      ],
+      "keywords": [
+        "thailand",
+        "phuket",
+        "krabi",
+        "phi phi",
+        "beach",
+        "islands",
+        "honeymoon",
+        "asia"
+      ],
+      "highlights": [
+        "Speedboat to the Phi Phi Islands and Maya Bay",
+        "Phang Nga Bay and James Bond Island",
+        "The Big Buddha and Old Phuket Town",
+        "Railay Beach and the Krabi four-island tour",
+        "Beach hotels in Patong and Ao Nang"
+      ],
+      "itinerary": [
+        {
+          "title": "Arrive in Phuket",
+          "description": "Transfer to your hotel in Patong. The evening is free on the beach or Bangla Road.",
+          "stay": "Phuket",
+          "meals": [],
+          "activities": []
+        },
+        {
+          "title": "Phi Phi Islands",
+          "description": "A full-day speedboat trip to Phi Phi Don, Maya Bay and Pileh Lagoon, with snorkelling stops and lunch on the island.",
+          "stay": "Phuket",
+          "meals": [
+            "BREAKFAST",
+            "LUNCH"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Phuket city tour",
+          "description": "The Big Buddha, Wat Chalong, the Karon viewpoint and the painted shophouses of Old Phuket Town. The afternoon is free.",
+          "stay": "Phuket",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Phang Nga Bay, then Krabi",
+          "description": "A morning boat trip among the limestone islands of Phang Nga Bay and James Bond Island, then the transfer to Ao Nang in Krabi.",
+          "stay": "Krabi",
+          "meals": [
+            "BREAKFAST",
+            "LUNCH"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Krabi's four islands",
+          "description": "By long-tail boat to Phra Nang Cave Beach, Chicken Island, Tup Island and Poda Island, with time on Railay.",
+          "stay": "Krabi",
+          "meals": [
+            "BREAKFAST",
+            "LUNCH"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Departure",
+          "description": "Transfer to Krabi or Phuket airport for your flight home.",
+          "stay": null,
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        }
+      ],
+      "inclusions": [
+        "3 nights in Phuket and 2 nights in Krabi, 4-star hotels with breakfast",
+        "All transfers, including Phuket to Krabi",
+        "Phi Phi Islands speedboat tour with lunch",
+        "Phang Nga Bay tour with lunch",
+        "Krabi four-island tour with lunch",
+        "Phuket city tour"
+      ],
+      "exclusions": [
+        "Flights",
+        "Thailand visa, if your passport needs one",
+        "National park fees on island tours",
+        "Dinners",
+        "Travel insurance"
+      ],
+      "prices": {
+        "ADULT": {
+          "INR": 32900,
+          "AED": 1430
+        },
+        "CHILD": {
+          "INR": 24700,
+          "AED": 1075
+        },
+        "INFANT": {
+          "INR": 3300,
+          "AED": 145
+        }
+      },
+      "isFeatured": true,
+      "displayOrder": 6
+    },
+    {
+      "slug": "bali",
+      "branch": "calicut",
+      "destination": "bali",
+      "category": "Islands",
+      "title": "Bali Island Escape",
+      "shortDescription": "Ubud's rice terraces, Nusa Penida's cliffs and sunset at Uluwatu.",
+      "description": "Bali in two halves. Three nights in Ubud for temples, rice terraces and the green interior, then two by the sea for beaches, Uluwatu and a day trip to Nusa Penida.\n\nA favourite with honeymooners and just as good with friends. Ask us about private pool villas in Ubud.",
+      "durationDays": 6,
+      "durationNights": 5,
+      "bestTime": "April to October",
+      "arrivalAirportCode": "DPS",
+      "arrivalCity": "Bali",
+      "hero": {
+        "file": "packages/bali/cover.jpg",
+        "alt": "Pura Ulun Danu Bratan shrines on Lake Bratan under a blue sky",
+        "focalPoint": "center 25%"
+      },
+      "gallery": [
+        {
+          "file": "packages/bali/tegallalang-rice-terraces.jpg",
+          "alt": "Green Tegallalang rice terraces and coconut palms near Ubud",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/bali/kelingking-beach.jpg",
+          "alt": "Kelingking Beach and its T-Rex shaped headland on Nusa Penida",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/bali/uluwatu-cliffs-sunset.jpg",
+          "alt": "Uluwatu sea cliffs and bougainvillea in warm evening light",
+          "focalPoint": null
+        }
+      ],
+      "keywords": [
+        "bali",
+        "indonesia",
+        "ubud",
+        "nusa penida",
+        "uluwatu",
+        "temples",
+        "honeymoon",
+        "beach",
+        "asia"
+      ],
+      "highlights": [
+        "Tegallalang rice terraces and the Tirta Empul water temple",
+        "Ulun Danu Bratan temple on Lake Beratan",
+        "Kintamani and the view of Mount Batur",
+        "Nusa Penida's Kelingking Beach and Broken Beach",
+        "The Kecak fire dance at Uluwatu Temple at sunset"
+      ],
+      "itinerary": [
+        {
+          "title": "Arrive in Bali",
+          "description": "Private transfer from the airport to your hotel in Ubud, about 90 minutes inland.",
+          "stay": "Ubud",
+          "meals": [],
+          "activities": []
+        },
+        {
+          "title": "Kintamani and the rice terraces",
+          "description": "The Tegallalang rice terraces, the holy springs of Tirta Empul and lunch with a view of Mount Batur at Kintamani.",
+          "stay": "Ubud",
+          "meals": [
+            "BREAKFAST",
+            "LUNCH"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Temples of the highlands",
+          "description": "North to Ulun Danu Bratan on Lake Beratan, then the Jatiluwih rice fields on the way back to Ubud.",
+          "stay": "Ubud",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "To the coast, sunset at Uluwatu",
+          "description": "Head south to your beach hotel. In the evening, Uluwatu Temple on its clifftop and the Kecak fire dance as the sun goes down.",
+          "stay": "Jimbaran",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Nusa Penida",
+          "description": "A fast boat to Nusa Penida for Kelingking Beach, Broken Beach and Angel's Billabong, back by evening.",
+          "stay": "Jimbaran",
+          "meals": [
+            "BREAKFAST",
+            "LUNCH"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Departure",
+          "description": "Transfer to the airport for your flight home.",
+          "stay": null,
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        }
+      ],
+      "inclusions": [
+        "3 nights in Ubud and 2 nights by the beach, 4-star hotels with breakfast",
+        "Private car and driver for all transfers and tours",
+        "Kintamani tour with lunch",
+        "Bedugul temples tour",
+        "Uluwatu Temple entry and Kecak dance tickets",
+        "Nusa Penida day trip with fast boat and lunch"
+      ],
+      "exclusions": [
+        "Flights",
+        "Indonesia visa on arrival and the Bali tourist levy",
+        "Dinners",
+        "Travel insurance"
+      ],
+      "prices": {
+        "ADULT": {
+          "INR": 36900,
+          "AED": 1605
+        },
+        "CHILD": {
+          "INR": 27700,
+          "AED": 1205
+        },
+        "INFANT": {
+          "INR": 3700,
+          "AED": 160
+        }
+      },
+      "isFeatured": true,
+      "displayOrder": 7
+    },
+    {
+      "slug": "georgia",
+      "branch": "dubai",
+      "destination": "georgia",
+      "category": "Mountains",
+      "title": "Georgia: Tbilisi & Kazbegi",
+      "shortDescription": "Old Tbilisi, the Gergeti church under Mount Kazbek and the ski slopes of Gudauri.",
+      "description": "Three hours from Dubai and on the same clock, Georgia is the easiest mountain holiday you can take from the UAE. Tbilisi has the old town, sulphur baths and wine bars; the Caucasus has the rest.\n\nThe highlight is the drive up the Georgian Military Road, past Ananuri fortress and Gudauri, to the Gergeti Trinity Church at 2,170 metres.",
+      "durationDays": 5,
+      "durationNights": 4,
+      "bestTime": "May to October, or December to March for snow",
+      "arrivalAirportCode": "TBS",
+      "arrivalCity": "Tbilisi",
+      "hero": {
+        "file": "packages/georgia/cover.jpg",
+        "alt": "Gergeti Trinity Church on a green ridge below the snowy Kazbek peaks",
+        "focalPoint": "center 72%"
+      },
+      "gallery": [
+        {
+          "file": "packages/georgia/tbilisi-narikala-night.jpg",
+          "alt": "Narikala Fortress lit above Tbilisi old town at blue hour",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/georgia/ananuri-fortress.jpg",
+          "alt": "Ananuri fortress above the turquoise Zhinvali reservoir in golden light",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/georgia/gudauri-ski-lift.jpg",
+          "alt": "Chairlift rising over snowy slopes and Caucasus peaks at Gudauri",
+          "focalPoint": null
+        }
+      ],
+      "keywords": [
+        "georgia",
+        "tbilisi",
+        "kazbegi",
+        "gudauri",
+        "snow",
+        "mountains",
+        "wine",
+        "caucasus"
+      ],
+      "highlights": [
+        "Gergeti Trinity Church and views of Mount Kazbek",
+        "Ananuri fortress on the Zhinvali reservoir",
+        "Gudauri and the Friendship Monument viewpoint",
+        "Tbilisi's old town, Narikala fortress and the cable car",
+        "Mtskheta's UNESCO-listed churches"
+      ],
+      "itinerary": [
+        {
+          "title": "Arrive in Tbilisi",
+          "description": "Transfer to your hotel near the old town. In the evening, walk across the Bridge of Peace and along the river.",
+          "stay": "Tbilisi",
+          "meals": [],
+          "activities": []
+        },
+        {
+          "title": "Tbilisi city tour",
+          "description": "The cable car up to Narikala fortress, the sulphur bath district, Metekhi church and the carved wooden balconies of the old town, ending at the Dry Bridge market.",
+          "stay": "Tbilisi",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Kazbegi and the Military Road",
+          "description": "A full day in the Caucasus: Ananuri fortress, Gudauri and the Friendship Monument, then a 4x4 up to the Gergeti Trinity Church above Stepantsminda. Back in Tbilisi by evening.",
+          "stay": "Tbilisi",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Mtskheta and a free afternoon",
+          "description": "Morning in Mtskheta, the ancient capital, at Jvari Monastery and Svetitskhoveli Cathedral. The afternoon is free for shopping or a wine tasting.",
+          "stay": "Tbilisi",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Departure",
+          "description": "Transfer to Tbilisi airport for your flight home.",
+          "stay": null,
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        }
+      ],
+      "inclusions": [
+        "4 nights in a 4-star hotel in Tbilisi with breakfast",
+        "Return airport transfers",
+        "Tbilisi city tour with cable car tickets",
+        "Kazbegi day trip with the 4x4 to Gergeti",
+        "Mtskheta half-day tour",
+        "English-speaking guide on all tours"
+      ],
+      "exclusions": [
+        "Flights",
+        "Georgia visa, if your passport needs one",
+        "Lunches and dinners",
+        "Travel insurance"
+      ],
+      "prices": {
+        "ADULT": {
+          "AED": 1450,
+          "INR": 33400
+        },
+        "CHILD": {
+          "AED": 1090,
+          "INR": 25100
+        },
+        "INFANT": {
+          "AED": 145,
+          "INR": 3300
+        }
+      },
+      "isFeatured": true,
+      "displayOrder": 8
+    },
+    {
+      "slug": "azerbaijan",
+      "branch": "dubai",
+      "destination": "azerbaijan",
+      "category": "Short break",
+      "title": "Azerbaijan: Baku & Gabala",
+      "shortDescription": "Baku's Flame Towers and walled old city, with a night in the mountains of Gabala.",
+      "description": "About three hours from Dubai, Baku pairs a walled medieval old town with some of the boldest modern architecture in the region. A night in Gabala's forests and mountains rounds it off.\n\nA good choice for families and groups, and one of the best-value trips we run.",
+      "durationDays": 5,
+      "durationNights": 4,
+      "bestTime": "April to June, and September to October",
+      "arrivalAirportCode": "GYD",
+      "arrivalCity": "Baku",
+      "hero": {
+        "file": "packages/azerbaijan/cover.jpg",
+        "alt": "Baku's three Flame Towers glowing at dusk above the city",
+        "focalPoint": null
+      },
+      "gallery": [
+        {
+          "file": "packages/azerbaijan/maiden-tower.jpg",
+          "alt": "The Maiden Tower in Baku's old city under a clear blue sky",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/azerbaijan/heydar-aliyev-center.jpg",
+          "alt": "The Heydar Aliyev Center's flowing white curves above its wide stone steps",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/azerbaijan/laza-mountains.jpg",
+          "alt": "Green meadows below the Caucasus mountains near Laza, Azerbaijan",
+          "focalPoint": null
+        }
+      ],
+      "keywords": [
+        "azerbaijan",
+        "baku",
+        "gabala",
+        "flame towers",
+        "mountains",
+        "short break",
+        "family",
+        "caucasus"
+      ],
+      "highlights": [
+        "Icherisheher, Baku's UNESCO-listed old city, and the Maiden Tower",
+        "The Flame Towers and the seafront Boulevard",
+        "The Heydar Aliyev Center",
+        "The Tufandag cable car in Gabala",
+        "Yanar Dag, the hillside that never stops burning"
+      ],
+      "itinerary": [
+        {
+          "title": "Arrive in Baku",
+          "description": "Transfer to your hotel, then an evening walk on the Boulevard as the Flame Towers light up.",
+          "stay": "Baku",
+          "meals": [],
+          "activities": []
+        },
+        {
+          "title": "Baku city tour",
+          "description": "The old city with the Maiden Tower and the Palace of the Shirvanshahs, Highland Park for the view over the bay, and the Heydar Aliyev Center.",
+          "stay": "Baku",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "To Gabala",
+          "description": "Drive through Shamakhi, stopping at the Juma Mosque, to Gabala in the foothills of the Caucasus. Afternoon on the Tufandag cable car and by Nohur lake.",
+          "stay": "Gabala",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Waterfalls and fire",
+          "description": "The Seven Beauties waterfall in the morning, then back to Baku with an evening stop at Yanar Dag.",
+          "stay": "Baku",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Departure",
+          "description": "Transfer to Heydar Aliyev International Airport for your flight home.",
+          "stay": null,
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        }
+      ],
+      "inclusions": [
+        "3 nights in Baku and 1 night in Gabala, 4-star hotels with breakfast",
+        "Private transfers, including Baku to Gabala",
+        "Baku city tour",
+        "Gabala tour with Tufandag cable car tickets",
+        "Yanar Dag entry"
+      ],
+      "exclusions": [
+        "Flights",
+        "Azerbaijan e-visa, if your passport needs one",
+        "Lunches and dinners",
+        "Travel insurance"
+      ],
+      "prices": {
+        "ADULT": {
+          "AED": 1290,
+          "INR": 29700
+        },
+        "CHILD": {
+          "AED": 970,
+          "INR": 22300
+        },
+        "INFANT": {
+          "AED": 130,
+          "INR": 3000
+        }
+      },
+      "isFeatured": false,
+      "displayOrder": 9
+    },
+    {
+      "slug": "turkey",
+      "branch": "dubai",
+      "destination": "turkey",
+      "category": "Culture",
+      "title": "Istanbul & Cappadocia",
+      "shortDescription": "Istanbul's mosques and bazaars, then cave hotels and sunrise balloons in Cappadocia.",
+      "description": "Two very different sides of Turkey. Istanbul has Byzantine churches, Ottoman mosques and the Bosphorus; Cappadocia has fairy chimneys, underground cities and nights in a cave hotel.\n\nThe flight between them takes about 80 minutes. The sunrise balloon flight is optional but worth it, and we book it as soon as you confirm.",
+      "durationDays": 7,
+      "durationNights": 6,
+      "bestTime": "April to June, and September to November",
+      "arrivalAirportCode": "IST",
+      "arrivalCity": "Istanbul",
+      "hero": {
+        "file": "packages/turkey/cover.jpg",
+        "alt": "Hot-air balloons drifting over Cappadocia's fairy chimneys at sunrise",
+        "focalPoint": null
+      },
+      "gallery": [
+        {
+          "file": "packages/turkey/blue-mosque.jpg",
+          "alt": "The Blue Mosque domes and six minarets rising above trees in Istanbul",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/turkey/galata-tower-bosphorus.jpg",
+          "alt": "Galata Tower lit at night with the Bosphorus Bridge glowing beyond",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/turkey/cappadocia-fairy-chimneys.jpg",
+          "alt": "Mushroom-capped fairy chimneys above a wide Cappadocia valley",
+          "focalPoint": null
+        }
+      ],
+      "keywords": [
+        "turkey",
+        "turkiye",
+        "istanbul",
+        "cappadocia",
+        "balloons",
+        "bosphorus",
+        "history",
+        "europe"
+      ],
+      "highlights": [
+        "Hagia Sophia, the Blue Mosque and Topkapi Palace",
+        "A Bosphorus cruise between Europe and Asia",
+        "The Grand Bazaar and the Spice Bazaar",
+        "Göreme Open Air Museum and the fairy chimneys",
+        "Derinkuyu underground city",
+        "An optional sunrise hot-air balloon flight"
+      ],
+      "itinerary": [
+        {
+          "title": "Arrive in Istanbul",
+          "description": "Transfer to your hotel in the old city. The evening is free around Sultanahmet.",
+          "stay": "Istanbul",
+          "meals": [],
+          "activities": []
+        },
+        {
+          "title": "Old Istanbul",
+          "description": "Hagia Sophia, the Blue Mosque, the Hippodrome and Topkapi Palace, ending in the Grand Bazaar.",
+          "stay": "Istanbul",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "The Bosphorus",
+          "description": "The Spice Bazaar in the morning, then a cruise along the Bosphorus past palaces and waterside mansions. The evening is free around Galata and Karaköy.",
+          "stay": "Istanbul",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Fly to Cappadocia",
+          "description": "A morning flight to Kayseri and the transfer to your cave hotel in Göreme. Sunset from the viewpoints above town.",
+          "stay": "Cappadocia",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Cappadocia's valleys",
+          "description": "The optional balloon flight at sunrise, then the Göreme Open Air Museum, Uçhisar castle, the fairy chimneys of Pasabag and the Derinkuyu underground city.",
+          "stay": "Cappadocia",
+          "meals": [
+            "BREAKFAST",
+            "LUNCH"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Back to Istanbul",
+          "description": "Fly back to Istanbul for a final evening. Dinner by the water is a good way to end the trip.",
+          "stay": "Istanbul",
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Departure",
+          "description": "Transfer to Istanbul Airport for your flight home.",
+          "stay": null,
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        }
+      ],
+      "inclusions": [
+        "4 nights in Istanbul and 2 nights in a Cappadocia cave hotel, with breakfast",
+        "Return domestic flights between Istanbul and Kayseri",
+        "All airport transfers",
+        "Guided tour of old Istanbul with entry tickets",
+        "Bosphorus cruise",
+        "Full-day Cappadocia tour with lunch"
+      ],
+      "exclusions": [
+        "International flights",
+        "Turkey visa or e-visa, if your passport needs one",
+        "Hot-air balloon flight, quoted on request",
+        "Dinners",
+        "Travel insurance"
+      ],
+      "prices": {
+        "ADULT": {
+          "AED": 2850,
+          "INR": 65600
+        },
+        "CHILD": {
+          "AED": 2140,
+          "INR": 49200
+        },
+        "INFANT": {
+          "AED": 285,
+          "INR": 6600
+        }
+      },
+      "isFeatured": true,
+      "displayOrder": 10
+    },
+    {
+      "slug": "maldives",
+      "branch": "dubai",
+      "destination": "maldives",
+      "category": "Honeymoon",
+      "title": "Maldives Overwater Retreat",
+      "shortDescription": "Three nights in a water villa, with breakfast and dinner every day.",
+      "description": "Four hours from Dubai and one hour ahead, with nothing to plan once you land. You stay in an overwater villa at a four-star resort, with half board and speedboat transfers from Malé.\n\nIdeal for honeymoons and anniversaries. Tell us the occasion when you book and we will let the resort know.",
+      "durationDays": 4,
+      "durationNights": 3,
+      "bestTime": "November to April",
+      "arrivalAirportCode": "MLE",
+      "arrivalCity": "Malé",
+      "hero": {
+        "file": "packages/maldives/cover.jpg",
+        "alt": "Thatched overwater villa with a private pool over a turquoise lagoon",
+        "focalPoint": null
+      },
+      "gallery": [
+        {
+          "file": "packages/maldives/white-sand-beach.jpg",
+          "alt": "White sand spit and palm trees beside a clear turquoise lagoon",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/maldives/coral-reef.jpg",
+          "alt": "Anemonefish swimming over a sea anemone on a colourful coral reef",
+          "focalPoint": null
+        },
+        {
+          "file": "packages/maldives/jetty-sunset.jpg",
+          "alt": "Wooden jetty leading to an overwater villa under a fiery sunset",
+          "focalPoint": null
+        }
+      ],
+      "keywords": [
+        "maldives",
+        "honeymoon",
+        "water villa",
+        "beach",
+        "snorkelling",
+        "resort",
+        "luxury",
+        "islands"
+      ],
+      "highlights": [
+        "An overwater villa with steps into the lagoon",
+        "Breakfast and dinner every day",
+        "Snorkelling on the house reef",
+        "A sunset dolphin cruise",
+        "Return speedboat transfers from Malé"
+      ],
+      "itinerary": [
+        {
+          "title": "Arrive in Malé",
+          "description": "The resort team meets you at Velana airport for the speedboat to your island. Check in to your water villa and settle in.",
+          "stay": "Resort",
+          "meals": [
+            "DINNER"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Reef and lagoon",
+          "description": "A free day. Snorkel the house reef, kayak or paddleboard on the lagoon, or book a spa treatment.",
+          "stay": "Resort",
+          "meals": [
+            "BREAKFAST",
+            "DINNER"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Sunset dolphin cruise",
+          "description": "Another slow day, then an evening boat trip to look for spinner dolphins as the sun goes down.",
+          "stay": "Resort",
+          "meals": [
+            "BREAKFAST",
+            "DINNER"
+          ],
+          "activities": []
+        },
+        {
+          "title": "Departure",
+          "description": "Speedboat back to Malé for your flight home.",
+          "stay": null,
+          "meals": [
+            "BREAKFAST"
+          ],
+          "activities": []
+        }
+      ],
+      "inclusions": [
+        "3 nights in an overwater villa at a 4-star resort",
+        "Breakfast and dinner daily",
+        "Return speedboat transfers from Malé",
+        "Sunset dolphin cruise",
+        "Snorkelling equipment",
+        "Taxes and the Maldives green tax"
+      ],
+      "exclusions": [
+        "Flights",
+        "Lunches and drinks",
+        "Seaplane transfers, where the resort needs them",
+        "Travel insurance"
+      ],
+      "prices": {
+        "ADULT": {
+          "AED": 4250,
+          "INR": 97800
+        },
+        "CHILD": {
+          "AED": 3190,
+          "INR": 73400
+        },
+        "INFANT": {
+          "AED": 425,
+          "INR": 9800
+        }
+      },
+      "isFeatured": true,
+      "displayOrder": 11
+    }
+  ],
+  "testimonials": [
+    {
+      "customerName": "Athul KP",
+      "profile": "Malaysia holiday",
+      "rating": 5,
+      "review": "Excellent Experience with Get Set Holidays! I recently went for a trip to Malaysia with Get Set Holidays, From the very beginning, their team was professional, responsive, and attentive to all our travel needs. The itinerary was well-planned, covering all the must-visit attractions while allowing for enough free time to explore at our own pace.",
+      "place": "Malaysia",
+      "sourceName": "Google",
+      "sourceUrl": "https://maps.google.com/?cid=7918922786561356044",
+      "reviewedAt": "2025-02-18",
+      "displayOrder": 0
+    },
+    {
+      "customerName": "Jencey Varughese",
+      "profile": "Desert safari",
+      "rating": 5,
+      "review": "Had a very wonderful experience with the desert safari program that was arranged. The Dune bashing, sunset photo, dinner were all simply superb. Special kudos to our driver Jay, and the variety of food options at the camp.. thank you for giving us a memorable experience..",
+      "place": "Dubai, UAE",
+      "sourceName": "Google",
+      "sourceUrl": "https://maps.google.com/?cid=7918922786561356044",
+      "reviewedAt": "2024-12-27",
+      "displayOrder": 1
+    },
+    {
+      "customerName": "Avinash S",
+      "profile": "Cruise holiday",
+      "rating": 5,
+      "review": "We are very happy to acknowledge the excellent service provided by Arya from Getset Tours and Travels, Dubai. She assisted us to arrange our Cruise trip in Resort World One Cruise Ship. We received all information regarding the trip well in advance. The trip was an exciting one and we enjoyed thoroughly.",
+      "place": "Dubai, UAE",
+      "sourceName": "Google",
+      "sourceUrl": "https://maps.google.com/?cid=7918922786561356044",
+      "reviewedAt": "2024-12-02",
+      "displayOrder": 2
+    },
+    {
+      "customerName": "Mirza Baig",
+      "profile": "Dubai holiday",
+      "rating": 5,
+      "review": "Mr Shahul is having excellent pleasing personality and very cooperative person. I feel like my home town when he was with us during my 1 week stay guiding all places and have done all arrangements well in advance. I strongly suggest to take his tourism services if you are planning vacation in Dubai. All arrangements were wonderful and well planned.",
+      "place": "Dubai, UAE",
+      "sourceName": "Google",
+      "sourceUrl": "https://maps.google.com/?cid=7918922786561356044",
+      "reviewedAt": "2024-08-05",
+      "displayOrder": 3
+    },
+    {
+      "customerName": "Perachi Selvan",
+      "profile": "Holiday booking",
+      "rating": 5,
+      "review": "I had a great experience with Arya Giriprasad. She communicated clearly, explained the entire booking process in detail, and made everything easy for us. Professional, efficient, and helpful throughout. Highly recommend!",
+      "place": "Dubai, UAE",
+      "sourceName": "Google",
+      "sourceUrl": "https://maps.google.com/?cid=7918922786561356044",
+      "reviewedAt": "2025-03-24",
+      "displayOrder": 4
+    },
+    {
+      "customerName": "Mohamed Rahees",
+      "profile": "Visa and tickets",
+      "rating": 5,
+      "review": "I had a fantastic experience with Team GetSet Tours and Travels! They efficiently handled my visa processing and ticketing, making the entire process smooth and hassle-free. I especially want to thank Mr. Shahul and Ms. Arya for their professionalism and responsiveness.",
+      "place": "Dubai, UAE",
+      "sourceName": "Google",
+      "sourceUrl": "https://maps.google.com/?cid=7918922786561356044",
+      "reviewedAt": "2024-10-29",
+      "displayOrder": 5
+    },
+    {
+      "customerName": "Divya Prabhakaran",
+      "profile": "Family visit visas",
+      "rating": 5,
+      "review": "I am incredibly grateful for Arya's exceptional support in securing visit visas for my husband and cousin quickly and smoothly. Her professionalism, attention to detail, and prompt responses made the entire process stress-free.",
+      "place": "Dubai, UAE",
+      "sourceName": "Google",
+      "sourceUrl": "https://maps.google.com/?cid=7918922786561356044",
+      "reviewedAt": "2025-03-24",
+      "displayOrder": 6
+    },
+    {
+      "customerName": "Athira Raj",
+      "profile": "Parents' visit visas",
+      "rating": 5,
+      "review": "Honestly speaking engaging with this travels has been my life hassle free whenever I had to bring my parents over board. With very few documents and minimal fees I am really happy with the personalized or customized service that I receive.",
+      "place": "Dubai, UAE",
+      "sourceName": "Google",
+      "sourceUrl": "https://maps.google.com/?cid=7918922786561356044",
+      "reviewedAt": "2024-07-24",
+      "displayOrder": 7
+    },
+    {
+      "customerName": "Soumya Elza",
+      "profile": "Visa renewal",
+      "rating": 5,
+      "review": "Excellent service from Aishwarya & Team Getset Tour's and travels for my visa renewal. She was responsive, knowledgeable, and made the process easy and stress-free. Highly recommend her and the agency.",
+      "place": "Dubai, UAE",
+      "sourceName": "Google",
+      "sourceUrl": "https://maps.google.com/?cid=7918922786561356044",
+      "reviewedAt": "2024-08-16",
+      "displayOrder": 8
+    },
+    {
+      "customerName": "Khaled Alsawalha",
+      "profile": "Travel services",
+      "rating": 5,
+      "review": "Great service, everything went smoothly as they promised.. definitely recommend it",
+      "place": "Dubai, UAE",
+      "sourceName": "Google",
+      "sourceUrl": "https://maps.google.com/?cid=7918922786561356044",
+      "reviewedAt": "2024-09-02",
+      "displayOrder": 9
+    }
+  ],
+  "heroSlides": [
+    {
+      "title": "Maldives Overwater Retreat",
+      "label": "MLE",
+      "image": {
+        "file": "packages/maldives/cover.jpg",
+        "alt": "Thatched overwater villa with a private pool over a turquoise lagoon",
+        "focalPoint": null
+      },
+      "buttonText": "View package",
+      "buttonLink": "/packages/maldives",
+      "displayOrder": 0
+    },
+    {
+      "title": "Dubai City Highlights",
+      "label": "DXB",
+      "image": {
+        "file": "packages/dubai-city-highlights/cover.jpg",
+        "alt": "Burj Khalifa rising above Downtown Dubai skyscrapers and a highway interchange in soft golden light",
+        "focalPoint": "center 25%"
+      },
+      "buttonText": "View package",
+      "buttonLink": "/packages/dubai-city-highlights",
+      "displayOrder": 1
+    },
+    {
+      "title": "Bali Island Escape",
+      "label": "DPS",
+      "image": {
+        "file": "packages/bali/cover.jpg",
+        "alt": "Pura Ulun Danu Bratan shrines on Lake Bratan under a blue sky",
+        "focalPoint": "center 25%"
+      },
+      "buttonText": "View package",
+      "buttonLink": "/packages/bali",
+      "displayOrder": 2
+    },
+    {
+      "title": "Istanbul & Cappadocia",
+      "label": "IST",
+      "image": {
+        "file": "packages/turkey/cover.jpg",
+        "alt": "Hot-air balloons drifting over Cappadocia's fairy chimneys at sunrise",
+        "focalPoint": null
+      },
+      "buttonText": "View package",
+      "buttonLink": "/packages/turkey",
+      "displayOrder": 3
+    },
+    {
+      "title": "Georgia: Tbilisi & Kazbegi",
+      "label": "TBS",
+      "image": {
+        "file": "packages/georgia/cover.jpg",
+        "alt": "Gergeti Trinity Church on a green ridge below the snowy Kazbek peaks",
+        "focalPoint": "center 72%"
+      },
+      "buttonText": "View package",
+      "buttonLink": "/packages/georgia",
+      "displayOrder": 4
+    },
+    {
+      "title": "Phuket & Krabi Islands",
+      "label": "HKT",
+      "image": {
+        "file": "packages/thailand/cover.jpg",
+        "alt": "A garlanded long-tail boat heading into turquoise Maya Bay between limestone cliffs",
+        "focalPoint": "center 75%"
+      },
+      "buttonText": "View package",
+      "buttonLink": "/packages/thailand",
+      "displayOrder": 5
+    }
+  ]
+}

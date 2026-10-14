@@ -1,14 +1,12 @@
-import { and, asc, count, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../db/client.ts";
-import { branches, packages } from "../db/schema.ts";
+import { Branch, Enquiry, Media, Package, withId, type BranchDoc } from "../db/models.ts";
 import { notFound } from "../lib/errors.ts";
 import { crudRoutes, nullableText, optionalId } from "./crud.ts";
 import { loadImages, type ImageDto } from "./media/dto.ts";
 import { refreshSearchText } from "./packages/search-text.ts";
 import { seoDto, seoInput, slugInput, uniqueSlug, withImages } from "./shared.ts";
 
-type BranchRow = typeof branches.$inferSelect;
+type BranchRow = Omit<BranchDoc, "_id"> & { id: string };
 
 const branchInput = z
   .object({
@@ -38,22 +36,27 @@ const branchInput = z
 export const branchAdminRoutes = crudRoutes({
   entity: "branch",
   label: "Branch",
-  table: branches,
+  model: Branch,
   create: branchInput,
   update: branchInput.partial(),
-  search: [branches.name, branches.city],
-  orderBy: [asc(branches.displayOrder), asc(branches.name)],
+  search: ["name", "city"],
+  sort: { displayOrder: 1, name: 1 },
   toDto: async (rows) => {
-    const image = await loadImages(db, rows.flatMap((row) => [row.bannerImageId, row.thumbnailImageId, row.ogImageId]));
+    const image = await loadImages(rows.flatMap((row) => [row.bannerImageId, row.thumbnailImageId, row.ogImageId]));
     return rows.map((row) => withImages(row, image));
   },
-  prepare: async (data, existing) =>
-    !existing && !data.slug ? { ...data, slug: await uniqueSlug(db, branches, branches.slug, data.name) } : data,
-  afterSave: (tx, id) => refreshSearchText(tx, eq(packages.branchId, id)),
+  prepare: async (data, existing) => (!existing && !data.slug ? { ...data, slug: await uniqueSlug(Branch, data.name) } : data),
+  refs: { bannerImageId: Media, thumbnailImageId: Media, ogImageId: Media },
+  // Every package (also archived and deleted ones) keeps its branch: a branch with packages can only be switched off.
+  inUse: async (id) => !!(await Package.exists({ branchId: id })),
+  onDelete: async (id) => {
+    await Enquiry.updateMany({ branchId: id }, { $set: { branchId: null } });
+  },
+  afterSave: (id) => refreshSearchText({ branchId: id }),
   tags: ["catalog"],
   // Branches shape the whole site: only admins create, edit or remove them.
   roles: { write: "ADMIN", delete: "ADMIN" },
-  orderable: branches.displayOrder,
+  orderable: true,
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -84,23 +87,29 @@ export function branchDto(row: BranchRow, image: (id: string | null) => ImageDto
 
 export type BranchDto = ReturnType<typeof branchDto>;
 
-const publishedPackages = and(eq(packages.status, "PUBLISHED"), isNull(packages.deletedAt));
+const publishedPackages = { status: "PUBLISHED" as const, deletedAt: null };
+
+/** Published packages per branch or destination id. */
+export async function publishedCounts(field: "branchId" | "destinationId") {
+  const groups = await Package.aggregate<{ _id: string; total: number }>([
+    { $match: publishedPackages },
+    { $group: { _id: `$${field}`, total: { $sum: 1 } } },
+  ]);
+  return new Map(groups.map((group) => [group._id, group.total]));
+}
 
 export async function listPublicBranches() {
-  const rows = await db.select().from(branches).where(eq(branches.isActive, true)).orderBy(asc(branches.displayOrder), asc(branches.name));
-  const counts = await db
-    .select({ branchId: packages.branchId, total: count() })
-    .from(packages)
-    .where(publishedPackages)
-    .groupBy(packages.branchId);
-  const image = await loadImages(db, rows.flatMap((row) => [row.bannerImageId, row.thumbnailImageId, row.ogImageId]));
-  return rows.map((row) => branchDto(row, image, counts.find((c) => c.branchId === row.id)?.total ?? 0));
+  const rows = (await Branch.find({ isActive: true }).sort({ displayOrder: 1, name: 1 }).lean<BranchDoc[]>()).map(withId);
+  const counts = await publishedCounts("branchId");
+  const image = await loadImages(rows.flatMap((row) => [row.bannerImageId, row.thumbnailImageId, row.ogImageId]));
+  return rows.map((row) => branchDto(row, image, counts.get(row.id) ?? 0));
 }
 
 export async function getPublicBranch(slug: string) {
-  const [row] = await db.select().from(branches).where(and(eq(branches.slug, slug), eq(branches.isActive, true))).limit(1);
-  if (!row) throw notFound("Branch");
-  const [{ total }] = await db.select({ total: count() }).from(packages).where(and(publishedPackages, eq(packages.branchId, row.id)));
-  const image = await loadImages(db, [row.bannerImageId, row.thumbnailImageId, row.ogImageId]);
+  const doc = await Branch.findOne({ slug, isActive: true }).lean<BranchDoc>();
+  if (!doc) throw notFound("Branch");
+  const row = withId(doc);
+  const total = await Package.countDocuments({ ...publishedPackages, branchId: row.id });
+  const image = await loadImages([row.bannerImageId, row.thumbnailImageId, row.ogImageId]);
   return branchDto(row, image, total);
 }

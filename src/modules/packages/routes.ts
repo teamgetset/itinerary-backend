@@ -5,8 +5,7 @@ import { signToken } from "../../lib/crypto.ts";
 import { idParam, ok, parse, readBody, readQuery, type AppEnv } from "../../lib/http.ts";
 import { requireRole } from "../auth/middleware.ts";
 import { audit } from "../audit.ts";
-import { db } from "../../db/client.ts";
-import { findPdfVersion, ensureCurrentPdf, pdfHeaders, pdfStatus, readPdf } from "../pdf/service.ts";
+import { findPdfVersion, ensureCurrentPdf, pdfHeaders, pdfStatus, readPdf, versionDto } from "../pdf/service.ts";
 import {
   activitiesInput,
   adminPackageQuery,
@@ -109,7 +108,7 @@ export const packageAdminRoutes = new Hono<AppEnv>()
     const id = idParam(c);
     await loadEditorGraph(id);
     const token = signToken(`package:${id}`, env.AUTH_SECRET, PREVIEW_TTL_SECONDS);
-    await audit(db, c.get("admin"), "PACKAGE_PREVIEWED", "package", id);
+    await audit(c.get("admin"), "PACKAGE_PREVIEWED", "package", id);
     return ok(c, {
       url: `${env.FRONTEND_URL}/preview/packages/${id}?token=${encodeURIComponent(token)}`,
       expiresAt: new Date(Date.now() + PREVIEW_TTL_SECONDS * 1000),
@@ -118,7 +117,7 @@ export const packageAdminRoutes = new Hono<AppEnv>()
 
   .get("/:id/pdf", async (c) => ok(c, await pdfStatus(idParam(c))))
   /** Generate now (no-op when the current content already has a PDF). */
-  .post("/:id/pdf", async (c) => ok(c, await ensureCurrentPdf(idParam(c), c.get("admin"))))
+  .post("/:id/pdf", async (c) => ok(c, versionDto(await ensureCurrentPdf(idParam(c), c.get("admin")))))
   .get("/:id/pdf/:version/:branding", async (c) => {
     const id = idParam(c);
     const version = parse(z.coerce.number().int().min(1), c.req.param("version"));

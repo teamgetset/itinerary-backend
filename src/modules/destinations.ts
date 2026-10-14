@@ -1,15 +1,14 @@
-import { and, asc, count, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../db/client.ts";
-import { activities, destinations, packages } from "../db/schema.ts";
+import { Activity, Destination, Media, Package, withId, type ActivityDoc, type DestinationDoc } from "../db/models.ts";
 import { notFound } from "../lib/errors.ts";
+import { publishedCounts } from "./branches.ts";
 import { activityDtos } from "./catalog.ts";
 import { crudRoutes, nullableText, optionalId } from "./crud.ts";
 import { loadImages, type ImageDto } from "./media/dto.ts";
 import { refreshSearchText } from "./packages/search-text.ts";
 import { seoDto, seoInput, slugInput, uniqueSlug, withImages } from "./shared.ts";
 
-type DestinationRow = typeof destinations.$inferSelect;
+type DestinationRow = Omit<DestinationDoc, "_id"> & { id: string };
 
 const destinationInput = z
   .object({
@@ -35,21 +34,25 @@ const destinationInput = z
 export const destinationAdminRoutes = crudRoutes({
   entity: "destination",
   label: "Destination",
-  table: destinations,
+  model: Destination,
   create: destinationInput,
   update: destinationInput.partial(),
-  search: [destinations.name, destinations.countryName, destinations.region],
-  orderBy: [asc(destinations.displayOrder), asc(destinations.name)],
-  filters: (query) => [query.active ? eq(destinations.isActive, query.active === "true") : undefined],
+  search: ["name", "countryName", "region"],
+  sort: { displayOrder: 1, name: 1 },
+  filters: (query) => [query.active ? { isActive: query.active === "true" } : undefined],
   toDto: async (rows) => {
-    const image = await loadImages(db, rows.flatMap((row) => [row.heroImageId, row.thumbnailImageId, row.ogImageId]));
+    const image = await loadImages(rows.flatMap((row) => [row.heroImageId, row.thumbnailImageId, row.ogImageId]));
     return rows.map((row) => withImages(row, image));
   },
-  prepare: async (data, existing) =>
-    !existing && !data.slug ? { ...data, slug: await uniqueSlug(db, destinations, destinations.slug, data.name) } : data,
-  afterSave: (tx, id) => refreshSearchText(tx, eq(packages.destinationId, id)),
+  prepare: async (data, existing) => (!existing && !data.slug ? { ...data, slug: await uniqueSlug(Destination, data.name) } : data),
+  refs: { heroImageId: Media, thumbnailImageId: Media, ogImageId: Media },
+  inUse: async (id) => !!(await Package.exists({ destinationId: id })),
+  onDelete: async (id) => {
+    await Activity.updateMany({ destinationId: id }, { $set: { destinationId: null } });
+  },
+  afterSave: (id) => refreshSearchText({ destinationId: id }),
   tags: ["catalog"],
-  orderable: destinations.displayOrder,
+  orderable: true,
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -74,40 +77,25 @@ export function destinationDto(row: DestinationRow, image: (id: string | null) =
 export type DestinationDto = ReturnType<typeof destinationDto>;
 
 export async function listPublicDestinations() {
-  const rows = await db
-    .select()
-    .from(destinations)
-    .where(eq(destinations.isActive, true))
-    .orderBy(asc(destinations.displayOrder), asc(destinations.name));
-  const counts = await db
-    .select({ destinationId: packages.destinationId, total: count() })
-    .from(packages)
-    .where(and(eq(packages.status, "PUBLISHED"), isNull(packages.deletedAt)))
-    .groupBy(packages.destinationId);
-  const image = await loadImages(db, rows.flatMap((row) => [row.heroImageId, row.thumbnailImageId, row.ogImageId]));
+  const rows = (await Destination.find({ isActive: true }).sort({ displayOrder: 1, name: 1 }).lean<DestinationDoc[]>()).map(withId);
+  const counts = await publishedCounts("destinationId");
+  const image = await loadImages(rows.flatMap((row) => [row.heroImageId, row.thumbnailImageId, row.ogImageId]));
   return rows.map((row) => ({
     ...destinationDto(row, image),
-    packageCount: counts.find((c) => c.destinationId === row.id)?.total ?? 0,
+    packageCount: counts.get(row.id) ?? 0,
   }));
 }
 
 /** A destination with its bookable add-on activities (for destination pages). */
 export async function getPublicDestination(slug: string) {
-  const [row] = await db
-    .select()
-    .from(destinations)
-    .where(and(eq(destinations.slug, slug), eq(destinations.isActive, true)))
-    .limit(1);
-  if (!row) throw notFound("Destination");
+  const doc = await Destination.findOne({ slug, isActive: true }).lean<DestinationDoc>();
+  if (!doc) throw notFound("Destination");
+  const row = withId(doc);
   const [image, activityRows] = await Promise.all([
-    loadImages(db, [row.heroImageId, row.thumbnailImageId, row.ogImageId]),
-    db
-      .select()
-      .from(activities)
-      .where(and(eq(activities.destinationId, row.id), eq(activities.isActive, true)))
-      .orderBy(asc(activities.displayOrder), asc(activities.name)),
+    loadImages([row.heroImageId, row.thumbnailImageId, row.ogImageId]),
+    Activity.find({ destinationId: row.id, isActive: true }).sort({ displayOrder: 1, name: 1 }).lean<ActivityDoc[]>(),
   ]);
-  const experiences = (await activityDtos(activityRows)).map((activity) => ({
+  const experiences = (await activityDtos(activityRows.map(withId))).map((activity) => ({
     slug: activity.slug,
     name: activity.name,
     description: activity.description,

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { itineraryActivityType } from "../../db/schema.ts";
+import { ITINERARY_ACTIVITY_TYPES } from "../../db/models.ts";
 import { nullableText, optionalId } from "../crud.ts";
 import { seoInput, slugInput } from "../shared.ts";
 import { PRICE_TYPES } from "./read.ts";
@@ -68,7 +68,7 @@ export const itineraryInput = z.object({
               title: z.string().trim().min(1, "Activity title is required.").max(160),
               description: nullableText(1000),
               location: nullableText(160),
-              type: z.enum(itineraryActivityType.enumValues).optional(),
+              type: z.enum(ITINERARY_ACTIVITY_TYPES).optional(),
               activityId: optionalId,
             }),
           )

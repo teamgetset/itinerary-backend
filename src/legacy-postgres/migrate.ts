@@ -1,9 +1,9 @@
 /**
- * `npm run db:migrate`          applies pending migrations, then lists every migration's state.
- * `npm run db:migrate -- --status` (or `npm run db:status`) only lists them.
+ * `npm run pg:migrate`          applies pending migrations, then lists every migration's state.
+ * `npm run pg:migrate -- --status` (or `npm run pg:status`) only lists them.
  */
-import { db, pool } from "../db/client.ts";
-import { applyMigrations, migrationStatus } from "../db/migrations.ts";
+import { db, pool } from "./client.ts";
+import { applyMigrations, migrationStatus } from "./migrations.ts";
 
 const statusOnly = process.argv.includes("--status");
 
@@ -22,7 +22,7 @@ try {
   console.log("\nMigration                          Created  Applied");
   for (const m of after) console.log(`${m.tag.padEnd(34)} yes      ${m.applied ? "yes" : "NO"}`);
   const pending = after.filter((m) => !m.applied).length;
-  console.log(pending ? `\n${pending} migration(s) not applied.` : "\nAll migrations applied. Run `npm run db:verify` to check the schema.");
+  console.log(pending ? `\n${pending} migration(s) not applied.` : "\nAll migrations applied. Run `npm run pg:verify` to check the schema.");
   process.exitCode = statusOnly && pending ? 1 : 0;
 } catch (error) {
   console.error("Migration failed:", error instanceof Error ? error.message : error);

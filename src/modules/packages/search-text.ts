@@ -1,42 +1,33 @@
-import { asc, eq, inArray, sql, type SQL } from "drizzle-orm";
-import type { Db, Tx } from "../../db/client.ts";
-import { branches, destinations, packageCategories, packageHighlights, packages } from "../../db/schema.ts";
+import { Branch, Category, Destination, Package, type BranchDoc, type CategoryDoc, type DestinationDoc, type PackageDoc } from "../../db/models.ts";
 import { normalizeText } from "../../lib/text.ts";
 
 /**
- * Rebuilds packages.search_text: title, pitch, keywords, destination, country, branch, category, arrival city
+ * Rebuilds packages.searchText: title, pitch, keywords, destination, country, branch, category, arrival city
  * and highlights, lower-cased without accents ("Malé" matches "male").
  * Called after any change to those, including renaming a destination, branch or category.
  */
-export async function refreshSearchText(db: Db | Tx, where: SQL) {
-  const rows = await db
-    .select({
-      id: packages.id,
-      title: packages.title,
-      shortDescription: packages.shortDescription,
-      keywords: packages.keywords,
-      arrivalCity: packages.arrivalCity,
-      arrivalAirportCode: packages.arrivalAirportCode,
-      destination: destinations.name,
-      country: destinations.countryName,
-      region: destinations.region,
-      branch: branches.name,
-      category: packageCategories.name,
-    })
-    .from(packages)
-    .innerJoin(destinations, eq(destinations.id, packages.destinationId))
-    .innerJoin(branches, eq(branches.id, packages.branchId))
-    .leftJoin(packageCategories, eq(packageCategories.id, packages.categoryId))
-    .where(where);
+export async function refreshSearchText(filter: Record<string, unknown>) {
+  const rows = await Package.find(filter, {
+    title: 1,
+    shortDescription: 1,
+    keywords: 1,
+    arrivalCity: 1,
+    arrivalAirportCode: 1,
+    branchId: 1,
+    destinationId: 1,
+    categoryId: 1,
+    highlights: 1,
+  }).lean<Pick<PackageDoc, "_id" | "title" | "shortDescription" | "keywords" | "arrivalCity" | "arrivalAirportCode" | "branchId" | "destinationId" | "categoryId" | "highlights">[]>();
   if (!rows.length) return;
 
-  const highlights = await db
-    .select({ packageId: packageHighlights.packageId, title: packageHighlights.title })
-    .from(packageHighlights)
-    .where(inArray(packageHighlights.packageId, rows.map((row) => row.id)))
-    .orderBy(asc(packageHighlights.displayOrder));
+  const ids = (field: "branchId" | "destinationId" | "categoryId") => [...new Set(rows.map((row) => row[field]).filter((id): id is string => !!id))];
+  // Sequential on purpose: this can run inside a transaction, which allows no parallel operations.
+  const destinations = new Map((await Destination.find({ _id: { $in: ids("destinationId") } }).lean<DestinationDoc[]>()).map((d) => [d._id, d]));
+  const branches = new Map((await Branch.find({ _id: { $in: ids("branchId") } }).lean<BranchDoc[]>()).map((b) => [b._id, b]));
+  const categories = new Map((await Category.find({ _id: { $in: ids("categoryId") } }).lean<CategoryDoc[]>()).map((c) => [c._id, c]));
 
   for (const row of rows) {
+    const destination = destinations.get(row.destinationId);
     const text = normalizeText(
       [
         row.title,
@@ -44,17 +35,17 @@ export async function refreshSearchText(db: Db | Tx, where: SQL) {
         ...row.keywords,
         row.arrivalCity,
         row.arrivalAirportCode,
-        row.destination,
-        row.country,
-        row.region,
-        row.branch,
-        row.category,
-        ...highlights.filter((h) => h.packageId === row.id).map((h) => h.title),
+        destination?.name,
+        destination?.countryName,
+        destination?.region,
+        branches.get(row.branchId)?.name,
+        row.categoryId ? categories.get(row.categoryId)?.name : null,
+        ...row.highlights.map((highlight) => highlight.title),
       ]
         .filter(Boolean)
         .join(" "),
     );
-    // Keep updated_at as it was: re-indexing is not an edit.
-    await db.update(packages).set({ searchText: text, updatedAt: sql`${packages.updatedAt}` }).where(eq(packages.id, row.id));
+    // Keep updatedAt as it was: re-indexing is not an edit.
+    await Package.updateOne({ _id: row._id }, { $set: { searchText: text } }, { timestamps: false });
   }
 }

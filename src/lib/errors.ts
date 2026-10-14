@@ -25,6 +25,13 @@ export const unauthorized = (message = "Sign in to continue") => new AppError(40
 
 export const forbidden = (message = "You do not have permission to do this") => new AppError(403, "FORBIDDEN", message);
 
+/** Deleting something other records still point at (the database used to enforce this with foreign keys). */
+export const inUse = () => new AppError(409, "IN_USE", "This is still used elsewhere. Remove those links first, or switch it off instead.");
+
+/** Saving a link to a record that does not exist. */
+export const invalidReference = (path: string) =>
+  new AppError(400, "INVALID_REFERENCE", "A linked record does not exist", [{ path, message: "This linked record does not exist" }]);
+
 /** Field-level problems, keyed by dotted path ("days.0.title"), so forms can show them next to the right input. */
 export function validationError(error: z.ZodError) {
   return new AppError(

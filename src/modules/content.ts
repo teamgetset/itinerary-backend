@@ -1,8 +1,6 @@
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../db/client.ts";
-import { siteContent } from "../db/schema.ts";
+import { SiteContent, type SiteContentDoc } from "../db/models.ts";
 import { notFound } from "../lib/errors.ts";
 import { ok, readBody, type AppEnv } from "../lib/http.ts";
 import { requireRole } from "./auth/middleware.ts";
@@ -113,17 +111,17 @@ export const CONTENT_DEFAULTS: Content = {
 const isKey = (key: string): key is ContentKey => key in CONTENT_SCHEMAS;
 
 export async function getContent(): Promise<Content> {
-  const rows = await db.select().from(siteContent);
+  const rows = await SiteContent.find().lean<SiteContentDoc[]>();
   const content = { ...CONTENT_DEFAULTS } as Record<string, unknown>;
   for (const row of rows) {
     // A stored value that no longer fits its schema (after a schema change) falls back to the default.
-    if (isKey(row.key) && CONTENT_SCHEMAS[row.key].safeParse(row.value).success) content[row.key] = row.value;
+    if (isKey(row._id) && CONTENT_SCHEMAS[row._id].safeParse(row.value).success) content[row._id] = row.value;
   }
   return content as Content;
 }
 
 export async function getContentBlock<K extends ContentKey>(key: K): Promise<Content[K]> {
-  const [row] = await db.select().from(siteContent).where(eq(siteContent.key, key)).limit(1);
+  const row = await SiteContent.findById(key).lean<SiteContentDoc>();
   const parsed = row ? CONTENT_SCHEMAS[key].safeParse(row.value) : null;
   return (parsed?.success ? parsed.data : CONTENT_DEFAULTS[key]) as Content[K];
 }
@@ -135,11 +133,8 @@ export const contentAdminRoutes = new Hono<AppEnv>()
     if (!isKey(key)) throw notFound("Content block");
     const value = await readBody(c, CONTENT_SCHEMAS[key]);
     const admin = c.get("admin");
-    await db
-      .insert(siteContent)
-      .values({ key, value, updatedById: admin.id })
-      .onConflictDoUpdate({ target: siteContent.key, set: { value, updatedById: admin.id, updatedAt: new Date() } });
-    await audit(db, admin, "CONTENT_UPDATED", "site_content", key);
+    await SiteContent.updateOne({ _id: key }, { $set: { value, updatedById: admin.id } }, { upsert: true });
+    await audit(admin, "CONTENT_UPDATED", "site_content", key);
     revalidate("content");
     return ok(c, value);
   });

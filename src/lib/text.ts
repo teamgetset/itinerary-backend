@@ -14,8 +14,11 @@ export const slugify = (value: string) =>
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
 
-/** Escapes LIKE wildcards in user input. */
-export const escapeLike = (value: string) => value.replace(/[\\%_]/g, (char) => `\\${char}`);
+/** Escapes regular-expression characters in user input, so `$regex` matches it literally. */
+export const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Case-insensitive "contains" filter for user-typed text (the `ILIKE '%q%'` of the PostgreSQL version). */
+export const contains = (value: string) => ({ $regex: escapeRegex(value), $options: "i" });
 
 export const slugSchemaMessage = "Use lower-case letters, numbers and single hyphens";
 export const SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;

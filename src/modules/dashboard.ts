@@ -1,47 +1,49 @@
 import { Hono } from "hono";
-import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../db/client.ts";
-import { adminUsers, auditLogs, branches, destinations, enquiries, packages, testimonials } from "../db/schema.ts";
+import { AdminUser, AuditLog, Branch, Destination, Enquiry, Package, Testimonial, defined, type AuditLogDoc, type EnquiryDoc } from "../db/models.ts";
 import { ok, pageMeta, pageQuery, readQuery, type AppEnv } from "../lib/http.ts";
 
-const tally = async (query: Promise<{ total: number }[]>) => (await query)[0]!.total;
+/** Admin names by id, for "who did this" columns. */
+async function adminNames(ids: (string | null)[]) {
+  const unique = [...new Set(ids.filter((id): id is string => !!id))];
+  const rows = unique.length ? await AdminUser.find({ _id: { $in: unique } }, { name: 1 }).lean<{ _id: string; name: string }[]>() : [];
+  return (id: string | null) => rows.find((row) => row._id === id)?.name ?? null;
+}
 
 export const dashboardRoutes = new Hono<AppEnv>().get("/", async (c) => {
-  const livePackages = isNull(packages.deletedAt);
-  const [totalPackages, publishedPackages, draftPackages, branchCount, destinationCount, testimonialCount, newEnquiries, recentEnquiries, recentPackages, activity] =
+  const livePackages = { deletedAt: null };
+  const [totalPackages, publishedPackages, draftPackages, branchCount, destinationCount, testimonialCount, newEnquiries, enquiries, recentPackages, logs] =
     await Promise.all([
-      tally(db.select({ total: count() }).from(packages).where(livePackages)),
-      tally(db.select({ total: count() }).from(packages).where(and(livePackages, eq(packages.status, "PUBLISHED")))),
-      tally(db.select({ total: count() }).from(packages).where(and(livePackages, eq(packages.status, "DRAFT")))),
-      tally(db.select({ total: count() }).from(branches)),
-      tally(db.select({ total: count() }).from(destinations)),
-      tally(db.select({ total: count() }).from(testimonials).where(and(isNull(testimonials.deletedAt), eq(testimonials.isPublished, true)))),
-      tally(db.select({ total: count() }).from(enquiries).where(eq(enquiries.status, "NEW"))),
-      db
-        .select({ id: enquiries.id, name: enquiries.name, status: enquiries.status, createdAt: enquiries.createdAt, packageTitle: packages.title, adults: enquiries.adults, children: enquiries.children, infants: enquiries.infants })
-        .from(enquiries)
-        .leftJoin(packages, eq(packages.id, enquiries.packageId))
-        .orderBy(desc(enquiries.createdAt))
-        .limit(5),
-      db
-        .select({ id: packages.id, title: packages.title, status: packages.status, updatedAt: packages.updatedAt })
-        .from(packages)
-        .where(livePackages)
-        .orderBy(desc(packages.updatedAt))
-        .limit(5),
-      db
-        .select({ action: auditLogs.action, entity: auditLogs.entity, entityId: auditLogs.entityId, createdAt: auditLogs.createdAt, admin: adminUsers.name })
-        .from(auditLogs)
-        .leftJoin(adminUsers, eq(adminUsers.id, auditLogs.adminUserId))
-        .orderBy(desc(auditLogs.createdAt))
-        .limit(8),
+      Package.countDocuments(livePackages),
+      Package.countDocuments({ ...livePackages, status: "PUBLISHED" }),
+      Package.countDocuments({ ...livePackages, status: "DRAFT" }),
+      Branch.countDocuments(),
+      Destination.countDocuments(),
+      Testimonial.countDocuments({ deletedAt: null, isPublished: true }),
+      Enquiry.countDocuments({ status: "NEW" }),
+      Enquiry.find({}, { name: 1, status: 1, createdAt: 1, packageId: 1, adults: 1, children: 1, infants: 1 }).sort({ createdAt: -1 }).limit(5).lean<EnquiryDoc[]>(),
+      Package.find(livePackages, { title: 1, status: 1, updatedAt: 1 }).sort({ updatedAt: -1 }).limit(5).lean<{ _id: string; title: string; status: string; updatedAt: Date }[]>(),
+      AuditLog.find().sort({ createdAt: -1 }).limit(8).lean<AuditLogDoc[]>(),
     ]);
+  const packageIds = [...new Set(enquiries.map((e) => e.packageId).filter((id): id is string => !!id))];
+  const [titles, admin] = await Promise.all([
+    Package.find({ _id: { $in: packageIds } }, { title: 1 }).lean<{ _id: string; title: string }[]>(),
+    adminNames(logs.map((log) => log.adminUserId)),
+  ]);
   return ok(c, {
     counts: { totalPackages, publishedPackages, draftPackages, branches: branchCount, destinations: destinationCount, testimonials: testimonialCount, newEnquiries },
-    recentEnquiries,
-    recentPackages,
-    activity,
+    recentEnquiries: enquiries.map((e) => ({
+      id: e._id,
+      name: e.name,
+      status: e.status,
+      createdAt: e.createdAt,
+      packageTitle: titles.find((t) => t._id === e.packageId)?.title ?? null,
+      adults: e.adults,
+      children: e.children,
+      infants: e.infants,
+    })),
+    recentPackages: recentPackages.map((p) => ({ id: p._id, title: p.title, status: p.status, updatedAt: p.updatedAt })),
+    activity: logs.map((log) => ({ action: log.action, entity: log.entity, entityId: log.entityId, createdAt: log.createdAt, admin: admin(log.adminUserId) })),
   });
 });
 
@@ -49,20 +51,19 @@ const auditQuery = pageQuery.extend({ entity: z.string().max(40).optional(), ent
 
 export const auditLogRoutes = new Hono<AppEnv>().get("/", async (c) => {
   const query = readQuery(c, auditQuery);
-  const where = and(
-    query.entity ? eq(auditLogs.entity, query.entity) : undefined,
-    query.entityId ? eq(auditLogs.entityId, query.entityId) : undefined,
-  );
-  const [rows, [{ total }]] = await Promise.all([
-    db
-      .select({ id: auditLogs.id, action: auditLogs.action, entity: auditLogs.entity, entityId: auditLogs.entityId, metadata: auditLogs.metadata, createdAt: auditLogs.createdAt, admin: adminUsers.name })
-      .from(auditLogs)
-      .leftJoin(adminUsers, eq(adminUsers.id, auditLogs.adminUserId))
-      .where(where)
-      .orderBy(desc(auditLogs.createdAt))
+  const filter = defined({ entity: query.entity, entityId: query.entityId });
+  const [rows, total] = await Promise.all([
+    AuditLog.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((query.page - 1) * query.pageSize)
       .limit(query.pageSize)
-      .offset((query.page - 1) * query.pageSize),
-    db.select({ total: count() }).from(auditLogs).where(where),
+      .lean<AuditLogDoc[]>(),
+    AuditLog.countDocuments(filter),
   ]);
-  return ok(c, rows, pageMeta(query.page, query.pageSize, total));
+  const admin = await adminNames(rows.map((row) => row.adminUserId));
+  return ok(
+    c,
+    rows.map((row) => ({ id: row._id, action: row.action, entity: row.entity, entityId: row.entityId, metadata: row.metadata, createdAt: row.createdAt, admin: admin(row.adminUserId) })),
+    pageMeta(query.page, query.pageSize, total),
+  );
 });

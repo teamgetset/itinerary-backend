@@ -7,9 +7,9 @@ import type { Db } from "./client.ts";
 
 /*
  * Migration states, kept apart on purpose:
- *   Created  - a SQL file exists in /drizzle (from `npm run db:generate`)
- *   Applied  - the database has recorded it in drizzle.__drizzle_migrations (from `npm run db:migrate`)
- *   Verified - the live schema matches src/db/schema.ts (from `npm run db:verify`)
+ *   Created  - a SQL file exists in /drizzle (from `npm run pg:generate`)
+ *   Applied  - the database has recorded it in drizzle.__drizzle_migrations (from `npm run pg:migrate`)
+ *   Verified - the live schema matches src/legacy-postgres/schema.ts (from `npm run pg:verify`)
  */
 
 export const migrationsFolder = fileURLToPath(new URL("../../drizzle", import.meta.url));

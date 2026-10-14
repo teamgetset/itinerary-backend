@@ -1,9 +1,7 @@
 import { Hono } from "hono";
-import { and, asc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { env } from "../config/env.ts";
-import { db } from "../db/client.ts";
-import { packageCategories, packages } from "../db/schema.ts";
+import { Category, type CategoryDoc } from "../db/models.ts";
 import { verifyToken } from "../lib/crypto.ts";
 import { AppError, notFound } from "../lib/errors.ts";
 import { clientIp, ok, pageQuery, parse, queryFlag, readBody, readQuery, type AppEnv } from "../lib/http.ts";
@@ -81,7 +79,7 @@ export const publicRoutes = new Hono<AppEnv>()
   .get("/destinations/:slug", async (c) => ok(c, await getPublicDestination(slugParam(c.req.param("slug")))))
 
   .get("/categories", async (c) => {
-    const rows = await db.select().from(packageCategories).orderBy(asc(packageCategories.displayOrder), asc(packageCategories.name));
+    const rows = await Category.find().sort({ displayOrder: 1, name: 1 }).lean<CategoryDoc[]>();
     return ok(c, rows.map(({ slug: categorySlug, name }) => ({ slug: categorySlug, name })));
   })
 
@@ -119,7 +117,7 @@ export const publicRoutes = new Hono<AppEnv>()
     const id = c.req.param("id");
     const payload = verifyToken(c.req.query("token") ?? "", env.AUTH_SECRET);
     if (payload !== `package:${id}`) throw new AppError(403, "PREVIEW_EXPIRED", "This preview link is invalid or has expired");
-    const graph = await loadPackageGraph(and(eq(packages.id, id), isNull(packages.deletedAt))!);
+    const graph = await loadPackageGraph({ _id: id, deletedAt: null });
     if (!graph) throw notFound("Package");
     c.header("Cache-Control", "private, no-store");
     c.header("X-Robots-Tag", "noindex, nofollow");

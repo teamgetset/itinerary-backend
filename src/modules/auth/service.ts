@@ -1,7 +1,6 @@
-import { and, eq, lt, sql } from "drizzle-orm";
 import { env } from "../../config/env.ts";
-import { db } from "../../db/client.ts";
-import { adminSessions, adminUsers } from "../../db/schema.ts";
+import { transaction } from "../../db/client.ts";
+import { AdminSession, AdminUser, type AdminUserDoc } from "../../db/models.ts";
 import { DUMMY_PASSWORD_HASH, randomToken, sha256, verifyPassword } from "../../lib/crypto.ts";
 import { AppError } from "../../lib/errors.ts";
 import type { AdminContext } from "../../lib/http.ts";
@@ -16,8 +15,8 @@ const attemptsByEmail = rateLimiter({ limit: 5, windowMs: 15 * 60_000 });
 /** Sessions are touched at most this often, so reads do not write on every request. */
 const TOUCH_AFTER_MS = 5 * 60_000;
 
-export const publicAdminUser = (user: typeof adminUsers.$inferSelect) => ({
-  id: user.id,
+export const publicAdminUser = (user: AdminUserDoc) => ({
+  id: user._id,
   name: user.name,
   email: user.email,
   role: user.role,
@@ -30,7 +29,8 @@ export async function login(email: string, password: string, client: { ip: strin
   attemptsByIp.hit(client.ip);
   attemptsByEmail.hit(normalized);
 
-  const user = await db.query.adminUsers.findFirst({ where: eq(sql`lower(${adminUsers.email})`, normalized) });
+  // Emails are stored lower-cased, so this is a case-insensitive match.
+  const user = await AdminUser.findOne({ email: normalized }).lean<AdminUserDoc>();
   // Always run the hash, so a missing account takes as long as a wrong password.
   const valid = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
   if (!user || !valid) {
@@ -38,59 +38,41 @@ export async function login(email: string, password: string, client: { ip: strin
     throw new AppError(401, "INVALID_CREDENTIALS", "Email or password is incorrect");
   }
   if (!user.isActive) {
-    log.warn("auth.login_blocked", { adminUserId: user.id });
+    log.warn("auth.login_blocked", { adminUserId: user._id });
     throw new AppError(403, "ACCOUNT_DISABLED", "This account has been deactivated. Ask a super admin to restore it.");
   }
   attemptsByEmail.reset(normalized);
 
   const token = randomToken();
   const expiresAt = new Date(Date.now() + env.SESSION_TTL_HOURS * 3_600_000);
-  await db.transaction(async (tx) => {
-    await tx.delete(adminSessions).where(and(eq(adminSessions.adminUserId, user.id), lt(adminSessions.expiresAt, new Date())));
-    await tx.insert(adminSessions).values({
-      adminUserId: user.id,
-      tokenHash: sha256(token),
-      expiresAt,
-      userAgent: client.userAgent?.slice(0, 300),
-    });
-    await tx.update(adminUsers).set({ lastLoginAt: new Date() }).where(eq(adminUsers.id, user.id));
-    await audit(tx, user, "ADMIN_LOGIN", "admin_user", user.id);
+  const lastLoginAt = new Date();
+  await transaction(async () => {
+    await AdminSession.deleteMany({ adminUserId: user._id, expiresAt: { $lt: new Date() } });
+    await AdminSession.create({ adminUserId: user._id, tokenHash: sha256(token), expiresAt, userAgent: client.userAgent?.slice(0, 300) ?? null });
+    await AdminUser.updateOne({ _id: user._id }, { $set: { lastLoginAt } });
+    await audit({ id: user._id }, "ADMIN_LOGIN", "admin_user", user._id);
   });
-  log.info("auth.login", { adminUserId: user.id });
-  return { token, expiresAt, user: publicAdminUser({ ...user, lastLoginAt: new Date() }) };
+  log.info("auth.login", { adminUserId: user._id });
+  return { token, expiresAt, user: publicAdminUser({ ...user, lastLoginAt }) };
 }
 
 /** Resolves a bearer token to its admin, or null when the token is unknown, expired or the account is inactive. */
 export async function authenticate(token: string): Promise<AdminContext | null> {
-  const [row] = await db
-    .select({
-      sessionId: adminSessions.id,
-      expiresAt: adminSessions.expiresAt,
-      lastUsedAt: adminSessions.lastUsedAt,
-      id: adminUsers.id,
-      name: adminUsers.name,
-      email: adminUsers.email,
-      role: adminUsers.role,
-      isActive: adminUsers.isActive,
-    })
-    .from(adminSessions)
-    .innerJoin(adminUsers, eq(adminUsers.id, adminSessions.adminUserId))
-    .where(eq(adminSessions.tokenHash, sha256(token)))
-    .limit(1);
-
-  if (!row || row.expiresAt <= new Date() || !row.isActive) return null;
-  if (Date.now() - row.lastUsedAt.getTime() > TOUCH_AFTER_MS) {
-    await db.update(adminSessions).set({ lastUsedAt: new Date() }).where(eq(adminSessions.id, row.sessionId));
+  const session = await AdminSession.findOne({ tokenHash: sha256(token) }).lean();
+  if (!session || session.expiresAt <= new Date()) return null;
+  const user = await AdminUser.findById(session.adminUserId).lean<AdminUserDoc>();
+  if (!user?.isActive) return null;
+  if (Date.now() - session.lastUsedAt.getTime() > TOUCH_AFTER_MS) {
+    await AdminSession.updateOne({ _id: session._id }, { $set: { lastUsedAt: new Date() } });
   }
-  return { id: row.id, name: row.name, email: row.email, role: row.role, sessionId: row.sessionId };
+  return { id: user._id, name: user.name, email: user.email, role: user.role, sessionId: session._id };
 }
 
 export async function logout(sessionId: string) {
-  await db.delete(adminSessions).where(eq(adminSessions.id, sessionId));
+  await AdminSession.deleteOne({ _id: sessionId });
 }
 
 /** Signs out every session of a user, e.g. after a password change or deactivation. */
 export async function revokeSessions(adminUserId: string, exceptSessionId?: string) {
-  const sessions = await db.select({ id: adminSessions.id }).from(adminSessions).where(eq(adminSessions.adminUserId, adminUserId));
-  for (const session of sessions) if (session.id !== exceptSessionId) await logout(session.id);
+  await AdminSession.deleteMany({ adminUserId, ...(exceptSessionId && { _id: { $ne: exceptSessionId } }) });
 }

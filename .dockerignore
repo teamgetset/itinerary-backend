@@ -1,0 +1,14 @@
+# Never in the image: secrets, local data, build output and anything only used on a developer's machine.
+.env
+.env.*
+!.env.example
+.data
+storage
+node_modules
+dist
+docs
+seed
+drizzle
+.git
+.DS_Store
+*.log

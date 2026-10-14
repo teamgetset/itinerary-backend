@@ -1,8 +1,6 @@
 import { Hono } from "hono";
-import { and, asc, count, eq, ne } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../db/client.ts";
-import { adminUsers } from "../db/schema.ts";
+import { AdminUser, defined, withId, type AdminUserDoc } from "../db/models.ts";
 import { hashPassword } from "../lib/crypto.ts";
 import { AppError, notFound } from "../lib/errors.ts";
 import { idParam, ok, readBody, type AppEnv } from "../lib/http.ts";
@@ -33,38 +31,47 @@ const updateInput = z.object({
   password: passwordInput.optional(),
 });
 
-async function activeSuperAdmins(exceptId: string) {
-  const [{ total }] = await db
-    .select({ total: count() })
-    .from(adminUsers)
-    .where(and(eq(adminUsers.role, "SUPER_ADMIN"), eq(adminUsers.isActive, true), ne(adminUsers.id, exceptId)));
-  return total;
+/**
+ * Changes an account's sign-in email and password, keeping its id, role and status (`npm run admin:credentials`).
+ * Like a password change in the admin, it ends the account's open sessions.
+ */
+export async function setCredentials(currentEmail: string, email: string, password: string) {
+  const existing = await AdminUser.findOne({ email: currentEmail.trim().toLowerCase() }, { _id: 1 }).lean();
+  if (!existing) throw notFound("Admin user");
+  const row = await AdminUser.findOneAndUpdate(
+    { _id: existing._id },
+    { $set: { email: email.trim().toLowerCase(), passwordHash: await hashPassword(password) } },
+    { returnDocument: "after" },
+  ).lean<AdminUserDoc>();
+  await revokeSessions(existing._id);
+  await audit(null, "ADMIN_USER_UPDATED", "admin_user", existing._id, { fields: ["email"], passwordChanged: true });
+  return withId(row!);
 }
+
+const activeSuperAdmins = (exceptId: string) => AdminUser.countDocuments({ role: "SUPER_ADMIN", isActive: true, _id: { $ne: exceptId } });
 
 export const adminUserRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
-    const rows = await db.select().from(adminUsers).orderBy(asc(adminUsers.name));
+    const rows = await AdminUser.find().sort({ name: 1 }).lean<AdminUserDoc[]>();
     return ok(c, rows.map(publicAdminUser));
   })
   .get("/:id", async (c) => {
-    const [row] = await db.select().from(adminUsers).where(eq(adminUsers.id, idParam(c))).limit(1);
+    const row = await AdminUser.findById(idParam(c)).lean<AdminUserDoc>();
     if (!row) throw notFound("Admin user");
     return ok(c, publicAdminUser(row));
   })
   .post("/", async (c) => {
     const input = await readBody(c, createInput);
-    const [row] = await db
-      .insert(adminUsers)
-      .values({ name: input.name, email: input.email, role: input.role, passwordHash: await hashPassword(input.password) })
-      .returning();
-    await audit(db, c.get("admin"), "ADMIN_USER_CREATED", "admin_user", row!.id, { role: input.role });
-    return ok(c, publicAdminUser(row!), undefined, 201);
+    const created = await AdminUser.create({ name: input.name, email: input.email, role: input.role, passwordHash: await hashPassword(input.password) });
+    const row = created.toObject() as AdminUserDoc;
+    await audit(c.get("admin"), "ADMIN_USER_CREATED", "admin_user", row._id, { role: input.role });
+    return ok(c, publicAdminUser(row), undefined, 201);
   })
   .patch("/:id", async (c) => {
     const id = idParam(c);
     const input = await readBody(c, updateInput);
     const admin = c.get("admin");
-    const [existing] = await db.select().from(adminUsers).where(eq(adminUsers.id, id)).limit(1);
+    const existing = await AdminUser.findById(id).lean<AdminUserDoc>();
     if (!existing) throw notFound("Admin user");
 
     // Never leave the system without an active super admin, and never lock yourself out.
@@ -74,19 +81,21 @@ export const adminUserRoutes = new Hono<AppEnv>()
     }
     if (id === admin.id && input.isActive === false) throw new AppError(409, "SELF_DEACTIVATION", "You cannot deactivate your own account.");
 
-    const [row] = await db
-      .update(adminUsers)
-      .set({
-        name: input.name,
-        role: input.role,
-        isActive: input.isActive,
-        ...(input.password && { passwordHash: await hashPassword(input.password) }),
-      })
-      .where(eq(adminUsers.id, id))
-      .returning();
+    const row = await AdminUser.findOneAndUpdate(
+      { _id: id },
+      {
+        $set: defined({
+          name: input.name,
+          role: input.role,
+          isActive: input.isActive,
+          passwordHash: input.password ? await hashPassword(input.password) : undefined,
+        }),
+      },
+      { returnDocument: "after" },
+    ).lean<AdminUserDoc>();
     // A new password or a deactivated account ends the user's other sessions straight away.
     if (input.password || input.isActive === false) await revokeSessions(id, id === admin.id ? admin.sessionId : undefined);
-    await audit(db, admin, "ADMIN_USER_UPDATED", "admin_user", id, {
+    await audit(admin, "ADMIN_USER_UPDATED", "admin_user", id, {
       fields: Object.keys(input).filter((key) => key !== "password"),
       passwordChanged: !!input.password,
     });

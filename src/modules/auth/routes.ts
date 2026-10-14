@@ -1,8 +1,6 @@
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../../db/client.ts";
-import { adminUsers } from "../../db/schema.ts";
+import { AdminUser, type AdminUserDoc } from "../../db/models.ts";
 import { audit } from "../audit.ts";
 import { clientIp, ok, readBody, type AppEnv } from "../../lib/http.ts";
 import { requireAdmin } from "./middleware.ts";
@@ -22,10 +20,10 @@ export const authRoutes = new Hono<AppEnv>()
   .post("/logout", requireAdmin, async (c) => {
     const admin = c.get("admin");
     await logout(admin.sessionId);
-    await audit(db, admin, "ADMIN_LOGOUT", "admin_user", admin.id);
+    await audit(admin, "ADMIN_LOGOUT", "admin_user", admin.id);
     return ok(c, { signedOut: true });
   })
   .get("/me", requireAdmin, async (c) => {
-    const user = await db.query.adminUsers.findFirst({ where: eq(adminUsers.id, c.get("admin").id) });
+    const user = await AdminUser.findById(c.get("admin").id).lean<AdminUserDoc>();
     return ok(c, publicAdminUser(user!));
   });

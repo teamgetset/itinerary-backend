@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { eq } from "drizzle-orm";
-import { db } from "../../db/client.ts";
-import { adminSessions, adminUsers } from "../../db/schema.ts";
+import { AdminSession, AdminUser } from "../../db/models.ts";
 import { api, signIn } from "../../test/helpers.ts";
+import { setCredentials } from "../admin-users.ts";
 
 test("valid login returns a session token and the user, without the password hash", async () => {
   const { email, password } = await signIn("ADMIN");
@@ -20,7 +19,7 @@ test("passwords are stored hashed and session tokens are stored only as hashes",
   const { user, password, token } = await signIn();
   assert.match(user.passwordHash, /^scrypt\$/);
   assert.equal(user.passwordHash.includes(password), false);
-  const sessions = await db.select().from(adminSessions).where(eq(adminSessions.adminUserId, user.id));
+  const sessions = await AdminSession.find({ adminUserId: user.id }).lean();
   assert.equal(sessions.some((s) => s.tokenHash === token), false);
 });
 
@@ -35,7 +34,7 @@ test("a wrong password and an unknown email give the same answer", async () => {
 
 test("an inactive admin cannot sign in, and their open sessions stop working", async () => {
   const { user, email, password, token } = await signIn("EDITOR");
-  await db.update(adminUsers).set({ isActive: false }).where(eq(adminUsers.id, user.id));
+  await AdminUser.updateOne({ _id: user.id }, { $set: { isActive: false } });
   const login = await api("POST", "/api/auth/login", { body: { email, password } });
   assert.equal(login.status, 403);
   assert.equal(login.body.error.code, "ACCOUNT_DISABLED");
@@ -47,7 +46,7 @@ test("admin APIs reject missing, unknown and expired tokens", async () => {
   assert.equal((await api("POST", "/api/admin/packages", { body: {} })).status, 401);
   assert.equal((await api("GET", "/api/admin/packages", { token: "made-up-token" })).status, 401);
   const { user, token } = await signIn();
-  await db.update(adminSessions).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(adminSessions.adminUserId, user.id));
+  await AdminSession.updateMany({ adminUserId: user.id }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
   const expired = await api("GET", "/api/admin/dashboard", { token });
   assert.equal(expired.status, 401);
   assert.match(expired.body.error.message, /ended/);
@@ -73,11 +72,11 @@ test("roles: editors edit content, admins publish, only super admins manage acco
 });
 
 test("super admins cannot lock the system out", async () => {
-  const [onlySuper] = await db.select().from(adminUsers).where(eq(adminUsers.role, "SUPER_ADMIN"));
-  await db.update(adminUsers).set({ isActive: false }).where(eq(adminUsers.role, "SUPER_ADMIN"));
-  await db.update(adminUsers).set({ isActive: true }).where(eq(adminUsers.id, onlySuper!.id));
+  const onlySuper = await AdminUser.findOne({ role: "SUPER_ADMIN" }).lean();
+  await AdminUser.updateMany({ role: "SUPER_ADMIN" }, { $set: { isActive: false } });
+  await AdminUser.updateOne({ _id: onlySuper!._id }, { $set: { isActive: true } });
   const me = await signIn("SUPER_ADMIN");
-  await db.update(adminUsers).set({ isActive: false }).where(eq(adminUsers.id, onlySuper!.id));
+  await AdminUser.updateOne({ _id: onlySuper!._id }, { $set: { isActive: false } });
   const self = await api("PATCH", `/api/admin/admin-users/${me.user.id}`, { token: me.token, body: { isActive: false } });
   assert.equal(self.status, 409);
   assert.equal(self.body.error.code, "LAST_SUPER_ADMIN");
@@ -103,6 +102,20 @@ test("creating an admin validates the password and hides the hash", async () => 
   });
   assert.equal(duplicate.status, 409);
   assert.equal(duplicate.body.error.details[0].path, "email");
+});
+
+test("changing an admin's email and password keeps the account, retires the old sign-in and ends sessions", async () => {
+  const { user, email, password, token } = await signIn("SUPER_ADMIN");
+  const updated = await setCredentials(email.toUpperCase(), "New.Owner@Test.local", "another-password-77");
+  assert.equal(updated.id, user.id);
+  assert.equal(updated.role, "SUPER_ADMIN");
+  assert.equal(updated.email, "new.owner@test.local");
+  assert.match(updated.passwordHash, /^scrypt\$/);
+  assert.equal((await api("GET", "/api/auth/me", { token })).status, 401);
+  assert.equal((await api("POST", "/api/auth/login", { body: { email, password } })).status, 401);
+  const login = await api("POST", "/api/auth/login", { body: { email: "new.owner@test.local", password: "another-password-77" } });
+  assert.equal(login.status, 200);
+  assert.equal(login.body.data.user.id, user.id);
 });
 
 test("repeated wrong passwords for one account are rate limited", async () => {

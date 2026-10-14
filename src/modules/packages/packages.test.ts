@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { eq } from "drizzle-orm";
-import { db } from "../../db/client.ts";
-import { auditLogs } from "../../db/schema.ts";
+import { AuditLog } from "../../db/models.ts";
 import { signToken } from "../../lib/crypto.ts";
 import { FULL_PRICES, api, catalogue, readyPackage, signIn } from "../../test/helpers.ts";
 
@@ -140,7 +138,7 @@ test("publish, unpublish, archive: public visibility follows status; PDF built o
   await api("POST", `/api/admin/packages/${pkg.id}/archive`, { token });
   assert.equal((await api("GET", `/api/admin/packages/${pkg.id}`, { token })).body.data.status, "ARCHIVED");
 
-  const actions = (await db.select().from(auditLogs).where(eq(auditLogs.entityId, pkg.id))).map((row) => row.action);
+  const actions = (await AuditLog.find({ entityId: pkg.id }).lean()).map((row) => row.action);
   for (const action of ["PACKAGE_CREATED", "PACKAGE_UPDATED", "PDF_GENERATED", "PACKAGE_PUBLISHED", "PACKAGE_UNPUBLISHED", "PACKAGE_ARCHIVED"]) {
     assert.ok(actions.includes(action), `missing ${action}`);
   }

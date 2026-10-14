@@ -1,40 +1,38 @@
 /**
- * `npm test`: runs every src/**\/*.test.ts against a real, throwaway PostgreSQL.
- * Starts a temporary cluster, migrates a template database once, then gives each test file its own copy
- * (CREATE DATABASE ... TEMPLATE), so files run in parallel without sharing state.
+ * `npm test`: runs every src/**\/*.test.ts against a real, throwaway MongoDB (no network, no Atlas, no Cloudinary).
+ * Starts a temporary one-node replica set (transactions need one), applies and verifies the indexes once with the
+ * same scripts used in real environments, then gives each test file its own database, so files run in parallel
+ * without sharing state.
  *   npm test -- packages     only files whose path contains "packages"
  */
 import { spawn } from "node:child_process";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import EmbeddedPostgres from "embedded-postgres";
-import pg from "pg";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
+
+/**
+ * The MongoDB server version for tests: the same 8.0 series as the Atlas cluster. Newer 8.0 patch builds need
+ * macOS 14; 8.0.4 also runs on older Macs. Downloaded once into ~/.cache/mongodb-binaries.
+ */
+const MONGODB_VERSION = "8.0.4";
 
 const root = new URL("../../", import.meta.url).pathname;
 const filter = process.argv[2];
 const files = (readdirSync(join(root, "src"), { recursive: true }) as string[])
-  .filter((file) => file.endsWith(".test.ts") && (!filter || file.includes(filter)))
+  // The legacy PostgreSQL tooling has its own check (`npm run pg:verify`); its test needs PostgreSQL.
+  .filter((file) => file.endsWith(".test.ts") && !file.startsWith("legacy-postgres") && (!filter || file.includes(filter)))
   .map((file) => join(root, "src", file))
   .sort();
 
 const dir = mkdtempSync(join(tmpdir(), "getset-test-"));
-const port = 20000 + Math.floor(Math.random() * 20000);
-const server = new EmbeddedPostgres({
-  databaseDir: join(dir, "pg"),
-  user: "test",
-  password: "test",
-  port,
-  persistent: false,
-  initdbFlags: ["--encoding=UTF8", "--locale-provider=builtin", "--builtin-locale=C.UTF-8"],
-  onLog: () => {},
-});
-const url = (database: string) => `postgres://test:test@localhost:${port}/${database}`;
+const replSet = await MongoMemoryReplSet.create({ binary: { version: MONGODB_VERSION }, replSet: { count: 1, storageEngine: "wiredTiger" } });
 
 const baseEnv = {
   ...process.env,
   NODE_ENV: "test",
   LOG_LEVEL: "error",
+  MONGODB_URI: replSet.getUri(),
   API_URL: "http://api.test",
   FRONTEND_URL: "http://site.test",
   ADMIN_URL: "http://admin.test",
@@ -56,32 +54,23 @@ function run(command: string, args: string[], env: NodeJS.ProcessEnv) {
 
 let failed = 0;
 try {
-  await server.initialise();
-  await server.start();
-  const admin = new pg.Client({ connectionString: url("postgres") });
-  admin.on("error", () => {});
-  await admin.connect();
-  await admin.query("create database getset_template");
-
-  // Migrate and verify the template once, through the same scripts used in real environments.
-  const env = { ...baseEnv, DATABASE_URL: url("getset_template"), STORAGE_LOCAL_DIR: join(dir, "storage") };
-  for (const script of ["migrate.ts", "verify-schema.ts"]) {
+  // Apply and verify the indexes once, through the same scripts used in real environments.
+  const env = { ...baseEnv, MONGODB_DB_NAME: "template", STORAGE_LOCAL_DIR: join(dir, "storage") };
+  for (const script of ["db-indexes.ts", "db-verify.ts"]) {
     const result = await run("node", ["--import", "tsx", join(root, "src/scripts", script)], env);
     if (result.code !== 0) throw new Error(`${script} failed:\n${result.output}`);
   }
-  console.log(`Template database migrated and verified. Running ${files.length} test file(s)...\n`);
+  console.log(`Indexes applied and verified. Running ${files.length} test file(s)...\n`);
 
   let next = 0;
   const worker = async () => {
     while (next < files.length) {
       const index = next++;
       const file = files[index]!;
-      const database = `t${index}`;
-      await admin.query(`create database ${database} template getset_template`);
       const started = Date.now();
       const result = await run("node", ["--import", "tsx", "--test", "--test-reporter=spec", file], {
         ...baseEnv,
-        DATABASE_URL: url(database),
+        MONGODB_DB_NAME: `t${index}`,
         STORAGE_LOCAL_DIR: join(dir, `storage-${index}`),
       });
       const name = relative(root, file);
@@ -91,12 +80,11 @@ try {
     }
   };
   await Promise.all(Array.from({ length: Math.min(4, files.length) }, worker));
-  await admin.end();
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   failed++;
 } finally {
-  await server.stop().catch(() => {});
+  await replSet.stop().catch(() => {});
   rmSync(dir, { recursive: true, force: true });
 }
 

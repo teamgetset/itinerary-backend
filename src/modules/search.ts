@@ -1,7 +1,5 @@
-import { and, asc, eq, ilike, or, sql } from "drizzle-orm";
-import { db } from "../db/client.ts";
-import { activities, destinations } from "../db/schema.ts";
-import { escapeLike, normalizeText } from "../lib/text.ts";
+import { Activity, Destination, type ActivityDoc, type DestinationDoc } from "../db/models.ts";
+import { contains, normalizeText } from "../lib/text.ts";
 import { loadImages } from "./media/dto.ts";
 import { listPublicPackages } from "./packages/read.ts";
 
@@ -12,31 +10,24 @@ import { listPublicPackages } from "./packages/read.ts";
 export async function search(q: string, limit: number) {
   const words = normalizeText(q);
   if (!words) return { query: q, packages: [], destinations: [], activities: [] };
-  const like = `%${escapeLike(q.trim())}%`;
+  const text = contains(q.trim());
 
-  const [packageResults, destinationRows, activityRows] = await Promise.all([
+  const [packageResults, destinationRows, activityMatches] = await Promise.all([
     listPublicPackages({ q, page: 1, pageSize: limit }),
-    db
-      .select()
-      .from(destinations)
-      .where(
-        and(
-          eq(destinations.isActive, true),
-          or(ilike(destinations.name, like), ilike(destinations.countryName, like), ilike(destinations.region, like)),
-        ),
-      )
-      .orderBy(asc(destinations.displayOrder))
-      .limit(limit),
-    db
-      .select({ activity: activities, destination: destinations })
-      .from(activities)
-      .leftJoin(destinations, eq(destinations.id, activities.destinationId))
-      .where(and(eq(activities.isActive, true), or(ilike(activities.name, like), ilike(activities.location, like))))
-      .orderBy(asc(sql`lower(${activities.name})`))
-      .limit(limit),
+    Destination.find({ isActive: true, $or: [{ name: text }, { countryName: text }, { region: text }] })
+      .sort({ displayOrder: 1 })
+      .limit(limit)
+      .lean<DestinationDoc[]>(),
+    Activity.find({ isActive: true, $or: [{ name: text }, { location: text }] }).lean<ActivityDoc[]>(),
   ]);
+  // Ordered by lower-cased name, as before. ponytail: sorts every match in memory; fine for a few hundred activities.
+  const activityRows = activityMatches
+    .sort((a, b) => (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : 0))
+    .slice(0, limit);
+  const destinationIds = [...new Set(activityRows.map((a) => a.destinationId).filter((id): id is string => !!id))];
+  const activityDestinations = destinationIds.length ? await Destination.find({ _id: { $in: destinationIds } }, { slug: 1, name: 1 }).lean<DestinationDoc[]>() : [];
 
-  const image = await loadImages(db, [...destinationRows.map((d) => d.heroImageId), ...activityRows.map((a) => a.activity.imageId)]);
+  const image = await loadImages([...destinationRows.map((d) => d.heroImageId), ...activityRows.map((a) => a.imageId)]);
   return {
     query: q,
     packages: packageResults.items,
@@ -46,12 +37,15 @@ export async function search(q: string, limit: number) {
       country: { code: d.countryCode, name: d.countryName },
       heroImage: image(d.heroImageId),
     })),
-    activities: activityRows.map(({ activity, destination }) => ({
-      slug: activity.slug,
-      name: activity.name,
-      location: activity.location,
-      image: image(activity.imageId),
-      destination: destination ? { slug: destination.slug, name: destination.name } : null,
-    })),
+    activities: activityRows.map((activity) => {
+      const destination = activityDestinations.find((d) => d._id === activity.destinationId);
+      return {
+        slug: activity.slug,
+        name: activity.name,
+        location: activity.location,
+        image: image(activity.imageId),
+        destination: destination ? { slug: destination.slug, name: destination.name } : null,
+      };
+    }),
   };
 }

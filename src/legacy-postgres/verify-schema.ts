@@ -1,7 +1,7 @@
-/** `npm run db:verify`: confirms the live database matches src/db/schema.ts. Exits 1 on any difference. */
-import { db, pool } from "../db/client.ts";
-import { migrationStatus } from "../db/migrations.ts";
-import { verifySchema } from "../db/verify.ts";
+/** `npm run pg:verify`: confirms the live database matches src/legacy-postgres/schema.ts. Exits 1 on any difference. */
+import { db, pool } from "./client.ts";
+import { migrationStatus } from "./migrations.ts";
+import { verifySchema } from "./verify.ts";
 
 try {
   const migrations = await migrationStatus(db);
@@ -17,7 +17,7 @@ try {
     console.log(`\nTables not defined by this schema (left untouched, review separately): ${report.unmanaged.join(", ")}`);
   }
   if (report.ok && !pending.length) {
-    console.log("\nVerified: the database matches src/db/schema.ts.");
+    console.log("\nVerified: the database matches src/legacy-postgres/schema.ts.");
   } else {
     console.log(`\nNOT verified. ${report.problems.length} problem(s):`);
     for (const problem of report.problems) console.log(`  - ${problem}`);

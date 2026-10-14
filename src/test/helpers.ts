@@ -1,10 +1,17 @@
 import { readFileSync } from "node:fs";
+import { after } from "node:test";
 import { createApp } from "../app.ts";
-import { db } from "../db/client.ts";
-import { adminUsers, currencies } from "../db/schema.ts";
+import { connectDb, disconnectDb } from "../db/client.ts";
+import { ensureIndexes } from "../db/indexes.ts";
+import { AdminUser, Currency, withId, type AdminUserDoc } from "../db/models.ts";
 import { hashPassword } from "../lib/crypto.ts";
 
 /* Shared test setup: the real app, called in-process, against this file's own database (see scripts/test.ts). */
+
+await connectDb();
+await ensureIndexes();
+// An open connection would keep the test process running after the last test.
+after(() => disconnectDb());
 
 export const app = createApp();
 
@@ -45,10 +52,10 @@ let counter = 0;
 export async function signIn(role: "SUPER_ADMIN" | "ADMIN" | "EDITOR" = "SUPER_ADMIN") {
   const email = `${role.toLowerCase()}-${++counter}-${Date.now()}@test.local`;
   const password = "correct-horse-42-battery";
-  const [user] = await db.insert(adminUsers).values({ name: `Test ${role}`, email, role, passwordHash: await hashPassword(password) }).returning();
+  const user = withId((await AdminUser.create({ name: `Test ${role}`, email, role, passwordHash: await hashPassword(password) })).toObject() as AdminUserDoc);
   const result = await api("POST", "/api/auth/login", { body: { email, password } });
   if (result.status !== 200) throw new Error(`login failed: ${JSON.stringify(result.body)}`);
-  return { token: result.body.data.token as string, user: user!, email, password };
+  return { token: result.body.data.token as string, user, email, password };
 }
 
 export const PHOTO = readFileSync(new URL("../../seed/images/branches/dubai.jpg", import.meta.url));
@@ -64,13 +71,12 @@ export async function uploadPhoto(token: string, name = "photo.jpg", bytes: Uint
 
 /** Currencies, a branch, a destination, a category and a photo: enough to build packages on. */
 export async function catalogue(token: string) {
-  await db
-    .insert(currencies)
-    .values([
-      { code: "INR", symbol: "₹", name: "Indian rupee", locale: "en-IN", displayOrder: 0 },
-      { code: "AED", symbol: "د.إ", name: "UAE dirham", locale: "en-AE", displayOrder: 1 },
-    ])
-    .onConflictDoNothing();
+  await Currency.bulkWrite(
+    [
+      { _id: "INR", symbol: "₹", name: "Indian rupee", locale: "en-IN", displayOrder: 0 },
+      { _id: "AED", symbol: "د.إ", name: "UAE dirham", locale: "en-AE", displayOrder: 1 },
+    ].map((currency) => ({ updateOne: { filter: { _id: currency._id }, update: { $setOnInsert: currency }, upsert: true } })),
+  );
   const photoId = await uploadPhoto(token);
   const branch = await api("POST", "/api/admin/branches", {
     token,

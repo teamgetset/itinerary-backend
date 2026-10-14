@@ -1,30 +1,26 @@
-import { and, count, desc, eq, ilike, inArray, isNull, or, type SQL } from "drizzle-orm";
-import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
+import type { Model } from "mongoose";
 import type { z } from "zod";
-import { db, type Tx } from "../../db/client.ts";
+import { transaction } from "../../db/client.ts";
 import {
-  activities,
-  branches,
-  currencies,
-  destinations,
-  hotels,
-  itineraryActivities,
-  itineraryDays,
-  media,
-  packageActivities,
-  packageCategories,
-  packageExclusions,
-  packageHighlights,
-  packageHotels,
-  packageImages,
-  packageInclusions,
-  packagePrices,
-  packages,
-} from "../../db/schema.ts";
-import { AppError, conflict, notFound } from "../../lib/errors.ts";
+  Activity,
+  Branch,
+  Category,
+  Currency,
+  Destination,
+  Hotel,
+  Media,
+  Package,
+  defined,
+  withId,
+  type BranchDoc,
+  type CategoryDoc,
+  type DestinationDoc,
+  type PackageDoc,
+} from "../../db/models.ts";
+import { AppError, conflict, invalidReference, notFound } from "../../lib/errors.ts";
 import { pageMeta, type AdminContext } from "../../lib/http.ts";
 import { log } from "../../lib/logger.ts";
-import { escapeLike } from "../../lib/text.ts";
+import { contains } from "../../lib/text.ts";
 import { audit } from "../audit.ts";
 import { activeCurrencies } from "../currencies.ts";
 import { loadImages } from "../media/dto.ts";
@@ -46,31 +42,32 @@ import type {
 import { PRICE_TYPES, loadPackageGraph, priceTable, type PackageGraph } from "./read.ts";
 import { refreshSearchText } from "./search-text.ts";
 
-type PackageRow = typeof packages.$inferSelect;
-const notDeleted = isNull(packages.deletedAt);
+type PackageRow = Omit<PackageDoc, "_id"> & { id: string };
+const notDeleted = { deletedAt: null };
 
 async function findPackage(id: string): Promise<PackageRow> {
-  const [row] = await db.select().from(packages).where(and(eq(packages.id, id), notDeleted)).limit(1);
-  if (!row) throw notFound("Package");
-  return row;
+  const doc = await Package.findOne({ _id: id, ...notDeleted }).lean<PackageDoc>();
+  if (!doc) throw notFound("Package");
+  return withId(doc);
 }
 
 /** Field-level error, shaped like validation errors so forms can show it next to the input. */
 const fieldError = (path: string, message: string) => new AppError(400, "VALIDATION_ERROR", message, [{ path, message }]);
 
-async function assertReferences(input: { branchId?: string; destinationId?: string; categoryId?: string | null; heroImageId?: string | null }) {
-  const checks: [string | null | undefined, () => Promise<unknown[]>, string, string][] = [
-    [input.branchId, () => db.select({ id: branches.id }).from(branches).where(eq(branches.id, input.branchId!)), "branchId", "Choose a branch."],
-    [input.destinationId, () => db.select({ id: destinations.id }).from(destinations).where(eq(destinations.id, input.destinationId!)), "destinationId", "Choose a destination."],
-    [input.categoryId, () => db.select({ id: packageCategories.id }).from(packageCategories).where(eq(packageCategories.id, input.categoryId!)), "categoryId", "That category no longer exists."],
-    [input.heroImageId, () => db.select({ id: media.id }).from(media).where(and(eq(media.id, input.heroImageId!), eq(media.kind, "IMAGE"))), "heroImageId", "Choose an image from the media library."],
+async function assertReferences(input: { branchId?: string; destinationId?: string; categoryId?: string | null; heroImageId?: string | null; ogImageId?: string | null }) {
+  const checks: [string | null | undefined, () => Promise<unknown>, string, string][] = [
+    [input.branchId, () => Branch.exists({ _id: input.branchId }), "branchId", "Choose a branch."],
+    [input.destinationId, () => Destination.exists({ _id: input.destinationId }), "destinationId", "Choose a destination."],
+    [input.categoryId, () => Category.exists({ _id: input.categoryId }), "categoryId", "That category no longer exists."],
+    [input.heroImageId, () => Media.exists({ _id: input.heroImageId, kind: "IMAGE" }), "heroImageId", "Choose an image from the media library."],
   ];
   for (const [value, query, path, message] of checks) {
-    if (value && !(await query()).length) throw fieldError(path, message);
+    if (value && !(await query())) throw fieldError(path, message);
   }
+  if (input.ogImageId && !(await Media.exists({ _id: input.ogImageId }))) throw invalidReference("ogImageId");
 }
 
-/** After any content change: re-index search, refresh the site, and rebuild the PDF if the package is live. */
+/** After any content change: refresh the site, and rebuild the PDF if the package is live. */
 async function afterChange(pkg: Pick<PackageRow, "id" | "status">) {
   if (pkg.status === "PUBLISHED") {
     revalidate("catalog");
@@ -80,10 +77,10 @@ async function afterChange(pkg: Pick<PackageRow, "id" | "status">) {
 
 /**
  * Published packages may not be incomplete: an edit to a live package that would fail the publish
- * checklist is rolled back. (Unpublish first to rework it.) Runs inside the edit's transaction.
+ * checklist is rolled back. (Unpublish first to rework it.) Runs inside the edit's transaction, so it sees the edit.
  */
-async function assertStillPublishable(tx: Tx, id: string) {
-  const graph = await loadPackageGraph(eq(packages.id, id), tx);
+async function assertStillPublishable(id: string) {
+  const graph = await loadPackageGraph({ _id: id });
   const failed = graph ? (await publishChecklist(graph)).filter((item) => !item.ok) : [];
   if (failed.length) {
     throw new AppError(
@@ -95,103 +92,110 @@ async function assertStillPublishable(tx: Tx, id: string) {
   }
 }
 
-/** Marks the package as edited (updated_at, updated_by) when only a child list changed. */
-const touch = (tx: Tx, id: string, admin: AdminContext) =>
-  tx.update(packages).set({ updatedById: admin.id, updatedAt: new Date() }).where(eq(packages.id, id));
+/** Marks the package as edited (updatedAt, updatedById) when only a section changed. */
+const touch = (id: string, admin: AdminContext) => Package.updateOne({ _id: id }, { $set: { updatedById: admin.id } });
 
 // ---------------------------------------------------------------------------------------------
 // Admin list and editor
 
 export async function listAdminPackages(query: z.infer<typeof adminPackageQuery>) {
-  const where = and(
-    notDeleted,
-    query.status ? eq(packages.status, query.status) : undefined,
-    query.branchId ? eq(packages.branchId, query.branchId) : undefined,
-    query.destinationId ? eq(packages.destinationId, query.destinationId) : undefined,
-    query.categoryId ? eq(packages.categoryId, query.categoryId) : undefined,
-    query.featured ? eq(packages.isFeatured, query.featured === "true") : undefined,
-    query.q
-      ? or(
-          ilike(packages.title, `%${escapeLike(query.q)}%`),
-          ilike(packages.slug, `%${escapeLike(query.q)}%`),
-          ilike(destinations.name, `%${escapeLike(query.q)}%`),
-          ilike(branches.name, `%${escapeLike(query.q)}%`),
-        )
-      : undefined,
-  );
-  const from = () =>
-    db
-      .select({ pkg: packages, branch: branches, destination: destinations, category: packageCategories })
-      .from(packages)
-      .innerJoin(branches, eq(branches.id, packages.branchId))
-      .innerJoin(destinations, eq(destinations.id, packages.destinationId))
-      .leftJoin(packageCategories, eq(packageCategories.id, packages.categoryId));
-
-  const [rows, [{ total }]] = await Promise.all([
-    from()
-      .where(where)
-      .orderBy(desc(packages.updatedAt))
+  const filter: Record<string, unknown> = {
+    ...notDeleted,
+    ...defined({ status: query.status, branchId: query.branchId, destinationId: query.destinationId, categoryId: query.categoryId }),
+    ...(query.featured && { isFeatured: query.featured === "true" }),
+  };
+  if (query.q) {
+    // Title, slug, or the name of its destination or branch.
+    const [destinations, branches] = [
+      await Destination.find({ name: contains(query.q) }, { _id: 1 }).lean<{ _id: string }[]>(),
+      await Branch.find({ name: contains(query.q) }, { _id: 1 }).lean<{ _id: string }[]>(),
+    ];
+    filter.$or = [
+      { title: contains(query.q) },
+      { slug: contains(query.q) },
+      { destinationId: { $in: destinations.map((row) => row._id) } },
+      { branchId: { $in: branches.map((row) => row._id) } },
+    ];
+  }
+  const [docs, total] = await Promise.all([
+    Package.find(filter)
+      .sort({ updatedAt: -1 })
+      .skip((query.page - 1) * query.pageSize)
       .limit(query.pageSize)
-      .offset((query.page - 1) * query.pageSize),
-    db
-      .select({ total: count() })
-      .from(packages)
-      .innerJoin(branches, eq(branches.id, packages.branchId))
-      .innerJoin(destinations, eq(destinations.id, packages.destinationId))
-      .where(where),
+      .lean<PackageDoc[]>(),
+    Package.countDocuments(filter),
   ]);
 
-  const ids = rows.map((row) => row.pkg.id);
-  const [image, prices, active] = await Promise.all([
-    loadImages(db, rows.map((row) => row.pkg.heroImageId)),
-    ids.length ? db.select().from(packagePrices).where(inArray(packagePrices.packageId, ids)) : [],
+  const ids = (field: "branchId" | "destinationId" | "categoryId") => [...new Set(docs.map((doc) => doc[field]).filter((id): id is string => !!id))];
+  const [branches, destinations, categories, image, active] = await Promise.all([
+    Branch.find({ _id: { $in: ids("branchId") } }).lean<BranchDoc[]>(),
+    Destination.find({ _id: { $in: ids("destinationId") } }).lean<DestinationDoc[]>(),
+    Category.find({ _id: { $in: ids("categoryId") } }).lean<CategoryDoc[]>(),
+    loadImages(docs.map((doc) => doc.heroImageId)),
     activeCurrencies(),
   ]);
+  const byId = <T extends { _id: string }>(rows: T[]) => new Map(rows.map((row) => [row._id, row]));
+  const [branchById, destinationById, categoryById] = [byId(branches), byId(destinations), byId(categories)];
   const codes = new Set(active.map((currency) => currency.code));
-  const items = rows.map(({ pkg, branch, destination, category }) => ({
-    id: pkg.id,
-    slug: pkg.slug,
-    title: pkg.title,
-    status: pkg.status,
-    branch: { id: branch.id, name: branch.name, slug: branch.slug },
-    destination: { id: destination.id, name: destination.name, slug: destination.slug },
-    category: category ? { id: category.id, name: category.name } : null,
-    durationDays: pkg.durationDays,
-    durationNights: pkg.durationNights,
-    startingPrice: priceTable(prices.filter((p) => p.packageId === pkg.id), codes).ADULT,
-    /** Every price, for the admin's pricing overview. */
-    prices: priceTable(prices.filter((p) => p.packageId === pkg.id), codes),
-    seo: { title: pkg.seoTitle, description: pkg.seoDescription, noindex: pkg.noindex },
-    heroImage: image(pkg.heroImageId),
-    isFeatured: pkg.isFeatured,
-    isRecommended: pkg.isRecommended,
-    publishedAt: pkg.publishedAt,
-    updatedAt: pkg.updatedAt,
-  }));
+  const items = docs.map((pkg) => {
+    const branch = branchById.get(pkg.branchId)!;
+    const destination = destinationById.get(pkg.destinationId)!;
+    const category = pkg.categoryId ? categoryById.get(pkg.categoryId) : undefined;
+    return {
+      id: pkg._id,
+      slug: pkg.slug,
+      title: pkg.title,
+      status: pkg.status,
+      branch: { id: branch._id, name: branch.name, slug: branch.slug },
+      destination: { id: destination._id, name: destination.name, slug: destination.slug },
+      category: category ? { id: category._id, name: category.name } : null,
+      durationDays: pkg.durationDays,
+      durationNights: pkg.durationNights,
+      startingPrice: priceTable(pkg.prices, codes).ADULT,
+      /** Every price, for the admin's pricing overview. */
+      prices: priceTable(pkg.prices, codes),
+      seo: { title: pkg.seoTitle, description: pkg.seoDescription, noindex: pkg.noindex },
+      heroImage: image(pkg.heroImageId),
+      isFeatured: pkg.isFeatured,
+      isRecommended: pkg.isRecommended,
+      publishedAt: pkg.publishedAt,
+      updatedAt: pkg.updatedAt,
+    };
+  });
   return { items, meta: pageMeta(query.page, query.pageSize, total) };
 }
 
 export async function loadEditorGraph(id: string) {
-  const graph = await loadPackageGraph(and(eq(packages.id, id), notDeleted)!);
+  const graph = await loadPackageGraph({ _id: id, ...notDeleted });
   if (!graph) throw notFound("Package");
   return graph;
 }
 
 /** Everything the admin package editor needs, with ids for every reference. */
 export async function packageEditorDto(graph: PackageGraph) {
-  const image = await loadImages(db, [
-    graph.heroImageId,
-    graph.ogImageId,
-    ...graph.images.map((row) => row.mediaId),
-    ...graph.itineraryDays.map((day) => day.imageId),
-  ]);
-  const { branch, destination, category, images, highlights, inclusions, exclusions, prices, hotels: hotelRows, activities: activityRows, itineraryDays: days, searchText: _searchText, ...fields } = graph;
+  const image = await loadImages([graph.heroImageId, graph.ogImageId, ...graph.gallery, ...graph.itinerary.map((day) => day.imageId)]);
+  const {
+    branch,
+    destination,
+    category,
+    gallery,
+    highlights,
+    inclusions,
+    exclusions,
+    prices,
+    hotels: hotelRows,
+    activities: activityRows,
+    activityIds: _activityIds,
+    itinerary: days,
+    searchText: _searchText,
+    ...fields
+  } = graph;
   return {
     ...withImages(fields, image),
     branch: { id: branch.id, name: branch.name, slug: branch.slug },
     destination: { id: destination.id, name: destination.name, slug: destination.slug },
     category: category ? { id: category.id, name: category.name } : null,
-    gallery: images.map((row) => ({ mediaId: row.mediaId, image: image(row.mediaId) })),
+    gallery: gallery.map((mediaId) => ({ mediaId, image: image(mediaId) })),
     highlights: highlights.map(({ title, description, icon }) => ({ title, description, icon })),
     inclusions: inclusions.map(({ title, description }) => ({ title, description })),
     exclusions: exclusions.map(({ title, description }) => ({ title, description })),
@@ -210,7 +214,7 @@ export async function packageEditorDto(graph: PackageGraph) {
         title: activity.title,
         description: activity.description,
         location: activity.location,
-        type: activity.activityType,
+        type: activity.type,
         activityId: activity.activityId,
       })),
     })),
@@ -232,15 +236,13 @@ export async function packageEditorDto(graph: PackageGraph) {
 
 export async function createPackage(input: z.infer<typeof createPackageInput>, admin: AdminContext) {
   await assertReferences(input);
-  const id = await db.transaction(async (tx) => {
-    const slug = input.slug ?? (await uniqueSlug(tx, packages, packages.slug, input.title));
-    const [row] = await tx
-      .insert(packages)
-      .values({ ...input, slug, status: "DRAFT", createdById: admin.id, updatedById: admin.id })
-      .returning({ id: packages.id });
-    await refreshSearchText(tx, eq(packages.id, row!.id));
-    await audit(tx, admin, "PACKAGE_CREATED", "package", row!.id, { title: input.title });
-    return row!.id;
+  const id = await transaction(async () => {
+    const slug = input.slug ?? (await uniqueSlug(Package, input.title));
+    const [created] = await Package.create([{ ...defined(input), slug, status: "DRAFT", createdById: admin.id, updatedById: admin.id }]);
+    const createdId = created!._id as string;
+    await refreshSearchText({ _id: createdId });
+    await audit(admin, "PACKAGE_CREATED", "package", createdId, { title: input.title });
+    return createdId;
   });
   log.info("package.created", { packageId: id, adminUserId: admin.id });
   return id;
@@ -252,125 +254,113 @@ export async function updatePackage(id: string, input: z.infer<typeof updatePack
   const nights = input.durationNights ?? existing.durationNights;
   if (nights > days) throw fieldError("durationNights", "Nights cannot be more than days.");
   await assertReferences(input);
-  await db.transaction(async (tx) => {
-    await tx.update(packages).set({ ...input, updatedById: admin.id }).where(eq(packages.id, id));
-    if (existing.status === "PUBLISHED") await assertStillPublishable(tx, id);
-    await refreshSearchText(tx, eq(packages.id, id));
-    await audit(tx, admin, "PACKAGE_UPDATED", "package", id, { section: "details", fields: Object.keys(input) });
+  await transaction(async () => {
+    await Package.updateOne({ _id: id }, { $set: { ...defined(input), updatedById: admin.id } });
+    if (existing.status === "PUBLISHED") await assertStillPublishable(id);
+    await refreshSearchText({ _id: id });
+    await audit(admin, "PACKAGE_UPDATED", "package", id, { section: "details", fields: Object.keys(input) });
   });
   log.info("package.updated", { packageId: id, adminUserId: admin.id });
   await afterChange(existing);
 }
 
 /** Replaces one section of the package (highlights, itinerary, prices...) in a single transaction. */
-async function replaceSection(id: string, admin: AdminContext, section: string, write: (tx: Tx) => Promise<void>) {
+async function replaceSection(id: string, admin: AdminContext, section: string, write: () => Promise<unknown>) {
   const existing = await findPackage(id);
-  await db.transaction(async (tx) => {
-    await write(tx);
-    if (existing.status === "PUBLISHED") await assertStillPublishable(tx, id);
-    await touch(tx, id, admin);
-    await audit(tx, admin, "PACKAGE_UPDATED", "package", id, { section });
+  await transaction(async () => {
+    await write();
+    if (existing.status === "PUBLISHED") await assertStillPublishable(id);
+    await touch(id, admin);
+    await audit(admin, "PACKAGE_UPDATED", "package", id, { section });
   });
   log.info("package.updated", { packageId: id, adminUserId: admin.id, section });
   await afterChange(existing);
 }
 
+const setSection = (id: string, fields: Partial<PackageDoc>) => Package.updateOne({ _id: id }, { $set: fields });
+
 export const saveHighlights = (id: string, input: z.infer<typeof highlightsInput>, admin: AdminContext) =>
-  replaceSection(id, admin, "highlights", async (tx) => {
-    await tx.delete(packageHighlights).where(eq(packageHighlights.packageId, id));
-    if (input.items.length) {
-      await tx.insert(packageHighlights).values(input.items.map((item, index) => ({ ...item, packageId: id, displayOrder: index })));
-    }
-    await refreshSearchText(tx, eq(packages.id, id));
+  replaceSection(id, admin, "highlights", async () => {
+    await setSection(id, {
+      highlights: input.items.map((item) => ({ title: item.title, description: item.description ?? null, icon: item.icon ?? null })),
+    });
+    await refreshSearchText({ _id: id });
   });
 
 export const saveInclusions = (id: string, input: z.infer<typeof inclusionsInput>, admin: AdminContext, kind: "inclusions" | "exclusions") =>
-  replaceSection(id, admin, kind, async (tx) => {
-    const table = kind === "inclusions" ? packageInclusions : packageExclusions;
-    await tx.delete(table).where(eq(table.packageId, id));
-    if (input.items.length) {
-      await tx.insert(table).values(input.items.map((item, index) => ({ ...item, packageId: id, displayOrder: index })));
-    }
-  });
+  replaceSection(id, admin, kind, () => setSection(id, { [kind]: input.items.map((item) => ({ title: item.title, description: item.description ?? null })) }));
 
 export async function saveItinerary(id: string, input: z.infer<typeof itineraryInput>, admin: AdminContext) {
-  // References are checked up front so a bad hotel or activity gives a clear message, not a database error.
+  // References are checked up front so a bad hotel or activity gives a clear message, not a broken link.
   const hotelIds = input.days.flatMap((day) => (day.hotelId ? [day.hotelId] : []));
   const activityIds = input.days.flatMap((day) => (day.activities ?? []).flatMap((a) => (a.activityId ? [a.activityId] : [])));
   const imageIds = input.days.flatMap((day) => (day.imageId ? [day.imageId] : []));
-  await assertAllExist(hotels, hotels.id, hotelIds, "days", "A selected hotel no longer exists.");
-  await assertAllExist(activities, activities.id, activityIds, "days", "A linked activity no longer exists.");
-  await assertAllExist(media, media.id, imageIds, "days", "A day image no longer exists.");
+  await assertAllExist(Hotel, hotelIds, "days", "A selected hotel no longer exists.");
+  await assertAllExist(Activity, activityIds, "days", "A linked activity no longer exists.");
+  await assertAllExist(Media, imageIds, "days", "A day image no longer exists.");
 
-  await replaceSection(id, admin, "itinerary", async (tx) => {
-    // Activities go with their days (on delete cascade).
-    await tx.delete(itineraryDays).where(eq(itineraryDays.packageId, id));
-    for (const [index, day] of input.days.entries()) {
-      const { activities: dayActivities = [], ...fields } = day;
-      const [created] = await tx
-        .insert(itineraryDays)
-        .values({ ...fields, packageId: id, dayNumber: index + 1 })
-        .returning({ id: itineraryDays.id });
-      if (dayActivities.length) {
-        await tx.insert(itineraryActivities).values(
-          dayActivities.map(({ type, ...activity }, order) => ({
-            ...activity,
-            activityType: type,
-            itineraryDayId: created!.id,
-            displayOrder: order,
-          })),
-        );
-      }
-    }
-  });
+  await replaceSection(id, admin, "itinerary", () =>
+    setSection(id, {
+      itinerary: input.days.map((day, index) => ({
+        dayNumber: index + 1,
+        title: day.title,
+        description: day.description ?? "",
+        stay: day.stay ?? null,
+        hotelId: day.hotelId ?? null,
+        meals: day.meals ?? [],
+        imageId: day.imageId ?? null,
+        activities: (day.activities ?? []).map((activity) => ({
+          time: activity.time ?? null,
+          title: activity.title,
+          description: activity.description ?? null,
+          location: activity.location ?? null,
+          type: activity.type ?? "OTHER",
+          activityId: activity.activityId ?? null,
+        })),
+      })),
+    }),
+  );
 }
 
 export async function savePrices(id: string, input: z.infer<typeof pricesInput>, admin: AdminContext) {
-  const known = new Set((await db.select({ code: currencies.code }).from(currencies)).map((row) => row.code));
+  const known = new Set((await Currency.find({}, { _id: 1 }).lean<{ _id: string }[]>()).map((row) => row._id));
   input.prices.forEach((price, index) => {
     if (!known.has(price.currencyCode)) throw fieldError(`prices.${index}.currencyCode`, `${price.currencyCode} is not a supported currency.`);
   });
-  await replaceSection(id, admin, "pricing", async (tx) => {
-    await tx.delete(packagePrices).where(eq(packagePrices.packageId, id));
-    if (input.prices.length) await tx.insert(packagePrices).values(input.prices.map((price) => ({ ...price, packageId: id })));
-  });
+  await replaceSection(id, admin, "pricing", () =>
+    setSection(id, { prices: input.prices.map(({ currencyCode, priceType, amount }) => ({ currencyCode, priceType, amount })) }),
+  );
 }
 
 export async function saveHotels(id: string, input: z.infer<typeof hotelsInput>, admin: AdminContext) {
-  await assertAllExist(hotels, hotels.id, input.hotels.map((h) => h.hotelId), "hotels", "A selected hotel no longer exists.");
-  await replaceSection(id, admin, "hotels", async (tx) => {
-    await tx.delete(packageHotels).where(eq(packageHotels.packageId, id));
-    if (input.hotels.length) {
-      await tx.insert(packageHotels).values(input.hotels.map((hotel, index) => ({ ...hotel, packageId: id, displayOrder: index })));
-    }
-  });
+  await assertAllExist(Hotel, input.hotels.map((h) => h.hotelId), "hotels", "A selected hotel no longer exists.");
+  await replaceSection(id, admin, "hotels", () =>
+    setSection(id, {
+      hotels: input.hotels.map((hotel) => ({
+        hotelId: hotel.hotelId,
+        nights: hotel.nights,
+        roomType: hotel.roomType ?? null,
+        mealPlan: hotel.mealPlan ?? null,
+        isDefault: hotel.isDefault ?? true,
+      })),
+    }),
+  );
 }
 
 export async function saveActivities(id: string, input: z.infer<typeof activitiesInput>, admin: AdminContext) {
-  await assertAllExist(activities, activities.id, input.activityIds, "activityIds", "A selected activity no longer exists.");
-  await replaceSection(id, admin, "activities", async (tx) => {
-    await tx.delete(packageActivities).where(eq(packageActivities.packageId, id));
-    if (input.activityIds.length) {
-      await tx.insert(packageActivities).values(input.activityIds.map((activityId, index) => ({ packageId: id, activityId, displayOrder: index })));
-    }
-  });
+  await assertAllExist(Activity, input.activityIds, "activityIds", "A selected activity no longer exists.");
+  await replaceSection(id, admin, "activities", () => setSection(id, { activityIds: input.activityIds }));
 }
 
 export async function saveGallery(id: string, input: z.infer<typeof galleryInput>, admin: AdminContext) {
-  await assertAllExist(media, media.id, input.mediaIds, "mediaIds", "A selected photo no longer exists.");
-  await replaceSection(id, admin, "gallery", async (tx) => {
-    await tx.delete(packageImages).where(eq(packageImages.packageId, id));
-    if (input.mediaIds.length) {
-      await tx.insert(packageImages).values(input.mediaIds.map((mediaId, index) => ({ packageId: id, mediaId, displayOrder: index })));
-    }
-  });
+  await assertAllExist(Media, input.mediaIds, "mediaIds", "A selected photo no longer exists.");
+  await replaceSection(id, admin, "gallery", () => setSection(id, { gallery: input.mediaIds }));
 }
 
-async function assertAllExist(table: PgTable, column: PgColumn, ids: string[], path: string, message: string) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function assertAllExist(model: Model<any>, ids: string[], path: string, message: string) {
   const unique = [...new Set(ids)];
-  if (!unique.length) return;
-  const found = await db.select({ id: column }).from(table).where(inArray(column, unique));
-  if (found.length !== unique.length) throw fieldError(path, message);
+  if (unique.length && (await model.countDocuments({ _id: { $in: unique } })) !== unique.length) throw fieldError(path, message);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -393,7 +383,7 @@ export async function publishChecklist(graph: PackageGraph): Promise<ChecklistIt
       (type) => `${PRICE_LABEL[type]} ${currency.code}`,
     ),
   );
-  const days = graph.itineraryDays.length;
+  const days = graph.itinerary.length;
   return [
     { key: "branch", label: "Branch", ok: graph.branch.isActive, message: graph.branch.isActive ? undefined : `${graph.branch.name} branch is switched off.` },
     { key: "destination", label: "Destination", ok: graph.destination.isActive, message: graph.destination.isActive ? undefined : `${graph.destination.name} is switched off.` },
@@ -430,12 +420,9 @@ export async function publishPackage(id: string, admin: AdminContext) {
   }
   // The PDF is part of a published package: build it (if this content has none yet) before going live.
   const pdf = await ensureCurrentPdf(id, admin);
-  await db.transaction(async (tx) => {
-    await tx
-      .update(packages)
-      .set({ status: "PUBLISHED", publishedAt: graph.publishedAt ?? new Date(), updatedById: admin.id })
-      .where(eq(packages.id, id));
-    await audit(tx, admin, "PACKAGE_PUBLISHED", "package", id, { pdfVersion: pdf.version });
+  await transaction(async () => {
+    await Package.updateOne({ _id: id }, { $set: { status: "PUBLISHED", publishedAt: graph.publishedAt ?? new Date(), updatedById: admin.id } });
+    await audit(admin, "PACKAGE_PUBLISHED", "package", id, { pdfVersion: pdf.version });
   });
   log.info("package.published", { packageId: id, adminUserId: admin.id, pdfVersion: pdf.version });
   revalidate("catalog");
@@ -444,70 +431,54 @@ export async function publishPackage(id: string, admin: AdminContext) {
 export async function setPackageStatus(id: string, status: "DRAFT" | "ARCHIVED", admin: AdminContext) {
   const existing = await findPackage(id);
   const action = status === "DRAFT" ? "PACKAGE_UNPUBLISHED" : "PACKAGE_ARCHIVED";
-  await db.transaction(async (tx) => {
-    await tx.update(packages).set({ status, updatedById: admin.id }).where(eq(packages.id, id));
-    await audit(tx, admin, action, "package", id, { from: existing.status });
+  await transaction(async () => {
+    await Package.updateOne({ _id: id }, { $set: { status, updatedById: admin.id } });
+    await audit(admin, action, "package", id, { from: existing.status });
   });
   log.info(status === "DRAFT" ? "package.unpublished" : "package.archived", { packageId: id, adminUserId: admin.id });
   if (existing.status === "PUBLISHED") revalidate("catalog");
 }
 
-/** Soft delete. The slug is released so it can be reused; history (enquiries, audit) keeps pointing at the row. */
+/** Soft delete. The slug is released so it can be reused; history (enquiries, audit) keeps pointing at the document. */
 export async function deletePackage(id: string, admin: AdminContext) {
   const existing = await findPackage(id);
   if (existing.status === "PUBLISHED") throw conflict("PACKAGE_PUBLISHED", "Unpublish or archive the package before deleting it.");
-  await db.transaction(async (tx) => {
-    await tx
-      .update(packages)
-      .set({ deletedAt: new Date(), slug: `${existing.slug}-deleted-${Date.now().toString(36)}`, updatedById: admin.id })
-      .where(eq(packages.id, id));
-    await audit(tx, admin, "PACKAGE_DELETED", "package", id, { slug: existing.slug });
+  await transaction(async () => {
+    await Package.updateOne(
+      { _id: id },
+      { $set: { deletedAt: new Date(), slug: `${existing.slug}-deleted-${Date.now().toString(36)}`, updatedById: admin.id } },
+    );
+    await audit(admin, "PACKAGE_DELETED", "package", id, { slug: existing.slug });
   });
 }
 
 /** A new draft with the same content, so a similar trip can start from an existing one. */
 export async function duplicatePackage(id: string, admin: AdminContext) {
   const graph = await loadEditorGraph(id);
-  const newId = await db.transaction(async (tx) => {
+  return transaction(async () => {
     const {
       id: _id, slug, title, status: _status, publishedAt: _p, createdAt: _c, updatedAt: _u, deletedAt: _d,
-      branch: _b, destination: _de, category: _ca, images, highlights, inclusions, exclusions, prices, hotels: hotelRows,
-      activities: activityRows, itineraryDays: days, ...fields
+      branch: _b, destination: _de, category: _ca, activities: _a, hotels, itinerary, ...fields
     } = graph;
-    const [copy] = await tx
-      .insert(packages)
-      .values({
+    const [copy] = await Package.create([
+      {
         ...fields,
+        hotels: hotels.map(({ hotel: _h, ...row }) => row),
+        itinerary: itinerary.map(({ hotel: _h, ...day }) => day),
         title: `${title} (copy)`,
-        slug: await uniqueSlug(tx, packages, packages.slug, `${slug}-copy`),
+        slug: await uniqueSlug(Package, `${slug}-copy`),
         status: "DRAFT",
         isFeatured: false,
         createdById: admin.id,
         updatedById: admin.id,
-      })
-      .returning({ id: packages.id });
-    const to = copy!.id;
-    const strip = <T extends { id?: string; packageId?: string }>({ id: _x, packageId: _y, ...rest }: T) => ({ ...rest, packageId: to });
-    if (images.length) await tx.insert(packageImages).values(images.map(({ packageId: _y, ...rest }) => ({ ...rest, packageId: to })));
-    if (highlights.length) await tx.insert(packageHighlights).values(highlights.map(strip));
-    if (inclusions.length) await tx.insert(packageInclusions).values(inclusions.map(strip));
-    if (exclusions.length) await tx.insert(packageExclusions).values(exclusions.map(strip));
-    if (prices.length) await tx.insert(packagePrices).values(prices.map(({ id: _x, packageId: _y, createdAt: _c2, updatedAt: _u2, ...rest }) => ({ ...rest, packageId: to })));
-    if (hotelRows.length) await tx.insert(packageHotels).values(hotelRows.map(({ id: _x, packageId: _y, hotel: _h, ...rest }) => ({ ...rest, packageId: to })));
-    if (activityRows.length) await tx.insert(packageActivities).values(activityRows.map(({ packageId: _y, activity: _a, ...rest }) => ({ ...rest, packageId: to })));
-    for (const { id: _x, packageId: _y, hotel: _h, activities: dayActivities, createdAt: _c3, updatedAt: _u3, ...day } of days) {
-      const [createdDay] = await tx.insert(itineraryDays).values({ ...day, packageId: to }).returning({ id: itineraryDays.id });
-      if (dayActivities.length) {
-        await tx.insert(itineraryActivities).values(dayActivities.map(({ id: _z, itineraryDayId: _w, ...rest }) => ({ ...rest, itineraryDayId: createdDay!.id })));
-      }
-    }
-    await refreshSearchText(tx, eq(packages.id, to));
-    await audit(tx, admin, "PACKAGE_DUPLICATED", "package", to, { from: id });
-    return to;
+      },
+    ]);
+    const copyId = copy!._id as string;
+    await refreshSearchText({ _id: copyId });
+    await audit(admin, "PACKAGE_DUPLICATED", "package", copyId, { from: id });
+    return copyId;
   });
-  return newId;
 }
 
 /** Re-index packages after a branch, destination or category is renamed. */
-export const reindexPackages = (where: SQL) => refreshSearchText(db, and(where, notDeleted)!);
-
+export const reindexPackages = (filter: Record<string, unknown>) => refreshSearchText({ ...filter, ...notDeleted });

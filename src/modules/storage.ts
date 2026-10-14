@@ -4,8 +4,8 @@ import { env } from "../config/env.ts";
 import { AppError } from "../lib/errors.ts";
 
 /**
- * Where files live. The rest of the app only knows keys ("images/2026/10/<uuid>.jpg") and this interface,
- * so swapping local disk for S3, R2 or Cloudinary means adding one provider here.
+ * Local file storage: images when STORAGE_PROVIDER=local (development, tests), generated PDFs, and the original files
+ * of images migrated to Cloudinary (kept for rollback). New images on Cloudinary go through media/store.ts.
  */
 export interface Storage {
   put(key: string, data: Buffer, contentType: string): Promise<void>;

@@ -21,7 +21,9 @@ const schema = z
     PORT: z.coerce.number().int().positive().default(4000),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
-    DATABASE_URL: z.string().regex(/^postgres(ql)?:\/\//, "must be a postgres:// connection string"),
+    /** MongoDB connection string (Atlas: mongodb+srv://...). Secret: never logged. */
+    MONGODB_URI: z.string().regex(/^mongodb(\+srv)?:\/\//, "must be a mongodb:// or mongodb+srv:// connection string"),
+    MONGODB_DB_NAME: z.string().regex(/^[A-Za-z0-9_-]{1,38}$/, "letters, numbers, - and _ only"),
 
     /** Public base URL of this API. Media and PDF links are built from it. */
     API_URL: z.url(),
@@ -34,11 +36,31 @@ const schema = z
     SESSION_TTL_HOURS: z.coerce.number().positive().max(24 * 30).default(12),
     /** Shared with the customer frontend so the API can ask it to refresh cached pages. */
     REVALIDATE_SECRET: optional(z.string().min(24)),
-    /** Set when running behind a reverse proxy, so client IPs are read from X-Forwarded-For. */
-    TRUST_PROXY: z.stringbool().default(false),
+    /**
+     * Shared with the admin's server (the same value in its Vercel project): only requests carrying it may name the
+     * visitor's address for rate limits. Secret, server only, never logged. Unset: such requests are ignored.
+     */
+    ADMIN_PROXY_SECRET: optional(
+      z.string().min(32, "must be at least 32 characters").refine((value) => value === value.trim(), "must not start or end with spaces"),
+    ),
+    /**
+     * Where the client's address (for rate limits) comes from. "cloudflare" on Render: its Cloudflare edge overwrites
+     * CF-Connecting-IP on every request. "false" elsewhere: the connection's address. X-Forwarded-For is never used:
+     * the edge appends to it, so its first entry is whatever the caller sent.
+     */
+    TRUST_PROXY: z
+      .enum(["false", "cloudflare"], { error: 'use "cloudflare" on Render, "false" elsewhere (X-Forwarded-For is never trusted)' })
+      .default("false"),
 
-    STORAGE_PROVIDER: z.enum(["local"]).default("local"),
+    /** Where new uploads go. "cloudinary" needs the CLOUDINARY_* variables; "local" writes to STORAGE_LOCAL_DIR. */
+    STORAGE_PROVIDER: z.enum(["local", "cloudinary"]).default("local"),
     STORAGE_LOCAL_DIR: z.string().default("./storage"),
+    CLOUDINARY_CLOUD_NAME: optional(z.string()),
+    /** Secret, like CLOUDINARY_API_SECRET: server only, never logged. */
+    CLOUDINARY_API_KEY: optional(z.string()),
+    CLOUDINARY_API_SECRET: optional(z.string()),
+    /** Folder for this database's assets, e.g. getset/staging. Part of every asset's permanent URL. */
+    CLOUDINARY_FOLDER: optional(z.string().regex(/^[A-Za-z0-9_-]+(\/[A-Za-z0-9_-]+)*$/, "folder names like getset/staging")),
 
     /** Chrome or Chromium used to print PDFs. Either a channel ("chrome") or an executable path. */
     PDF_BROWSER_CHANNEL: z.string().default("chrome"),
@@ -52,6 +74,12 @@ const schema = z
   .refine((env) => env.SUPPORTED_CURRENCIES.includes(env.DEFAULT_CURRENCY), {
     message: "DEFAULT_CURRENCY must be one of SUPPORTED_CURRENCIES",
     path: ["DEFAULT_CURRENCY"],
+  })
+  .superRefine((env, ctx) => {
+    if (env.STORAGE_PROVIDER !== "cloudinary") return;
+    for (const name of ["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET", "CLOUDINARY_FOLDER"] as const) {
+      if (!env[name]) ctx.addIssue({ code: "custom", path: [name], message: "required when STORAGE_PROVIDER=cloudinary" });
+    }
   });
 
 function load() {
@@ -65,6 +93,9 @@ function load() {
   if (env.NODE_ENV === "production" && /change-me/i.test(env.AUTH_SECRET)) {
     console.error("AUTH_SECRET still has the example value. Generate one with: openssl rand -base64 48");
     process.exit(1);
+  }
+  if (env.NODE_ENV === "production" && !env.ADMIN_PROXY_SECRET) {
+    console.warn("ADMIN_PROXY_SECRET is not set: admin sign-ins share one rate limit (the admin server's address).");
   }
   return env;
 }

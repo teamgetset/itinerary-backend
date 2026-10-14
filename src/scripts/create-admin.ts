@@ -5,9 +5,10 @@
  */
 import { parseArgs } from "node:util";
 import { randomBytes } from "node:crypto";
-import { db, pool } from "../db/client.ts";
-import { adminUsers } from "../db/schema.ts";
+import { connectDb, disconnectDb } from "../db/client.ts";
+import { AdminUser } from "../db/models.ts";
 import { hashPassword } from "../lib/crypto.ts";
+import { safeMessage } from "../lib/logger.ts";
 import { passwordInput } from "../modules/admin-users.ts";
 
 const { values } = parseArgs({
@@ -26,12 +27,14 @@ if (!check.success) {
   process.exit(1);
 }
 try {
-  await db.insert(adminUsers).values({ email: values.email.toLowerCase(), name: values.name, role, passwordHash: await hashPassword(password) });
+  await connectDb();
+  await AdminUser.create({ email: values.email.toLowerCase(), name: values.name, role, passwordHash: await hashPassword(password) });
   console.log(`Created ${role} ${values.email}.`);
   if (generated) console.log(`Password (shown once, store it safely): ${password}`);
 } catch (error) {
-  console.error("Could not create the admin:", (error as { cause?: { detail?: string } }).cause?.detail ?? (error as Error).message);
+  const duplicate = (error as { code?: number }).code === 11000;
+  console.error("Could not create the admin:", duplicate ? "an account with this email already exists" : safeMessage(error));
   process.exitCode = 1;
 } finally {
-  await pool.end();
+  await disconnectDb();
 }

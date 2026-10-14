@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { eq } from "drizzle-orm";
-import { db } from "../db/client.ts";
-import { auditLogs } from "../db/schema.ts";
+import { AuditLog } from "../db/models.ts";
 import { api, signIn } from "../test/helpers.ts";
 
 const { token } = await signIn();
@@ -45,7 +43,7 @@ test("publish and unpublish: only published reviews are public, and both are aud
   assert.equal(await isPublic(), true);
   await api("PATCH", `/api/admin/testimonials/${id}`, { token, body: { isPublished: false } });
   assert.equal(await isPublic(), false);
-  const actions = (await db.select().from(auditLogs).where(eq(auditLogs.entityId, id))).map((row) => row.action);
+  const actions = (await AuditLog.find({ entityId: id }).lean()).map((row) => row.action);
   assert.ok(actions.includes("TESTIMONIAL_PUBLISHED"));
   assert.ok(actions.includes("TESTIMONIAL_UNPUBLISHED"));
 });

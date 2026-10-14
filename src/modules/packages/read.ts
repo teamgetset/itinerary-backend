@@ -1,24 +1,24 @@
-import { and, asc, count, desc, eq, exists, gte, inArray, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
 import { env } from "../../config/env.ts";
-import { db, type Db, type Tx } from "../../db/client.ts";
 import {
-  branches,
-  destinations,
-  itineraryActivities,
-  itineraryDays,
-  packageActivities,
-  packageCategories,
-  packageExclusions,
-  packageHighlights,
-  packageHotels,
-  packageImages,
-  packageInclusions,
-  packagePrices,
-  packages,
-} from "../../db/schema.ts";
+  Activity,
+  Branch,
+  Category,
+  Destination,
+  Hotel,
+  Package,
+  PRICE_TYPES,
+  withId,
+  type ActivityDoc,
+  type BranchDoc,
+  type CategoryDoc,
+  type DestinationDoc,
+  type HotelDoc,
+  type PackageDoc,
+  type PackagePrice,
+  type PriceType,
+} from "../../db/models.ts";
 import { pageMeta } from "../../lib/http.ts";
-import { escapeLike, normalizeText } from "../../lib/text.ts";
+import { escapeRegex, normalizeText } from "../../lib/text.ts";
 import { branchDto } from "../branches.ts";
 import { getContentBlock } from "../content.ts";
 import { activeCurrencies } from "../currencies.ts";
@@ -27,32 +27,42 @@ import { loadImages, type ImageDto } from "../media/dto.ts";
 import { seoDto } from "../shared.ts";
 import { testimonialsForPackages } from "../testimonials.ts";
 
-export const PRICE_TYPES = ["ADULT", "CHILD", "INFANT"] as const;
-export type PriceType = (typeof PRICE_TYPES)[number];
+export { PRICE_TYPES, type PriceType };
 /** { ADULT: { INR: 26900, AED: 1185 }, CHILD: {...}, INFANT: {...} } - official amounts, no conversion. */
 export type PriceTable = Record<PriceType, Record<string, number>>;
 
-type PackageRow = typeof packages.$inferSelect;
-type PriceRow = Pick<typeof packagePrices.$inferSelect, "packageId" | "priceType" | "currencyCode" | "amount">;
+type PackageRow = Omit<PackageDoc, "_id"> & { id: string };
+type BranchRow = Omit<BranchDoc, "_id"> & { id: string };
+type DestinationRow = Omit<DestinationDoc, "_id"> & { id: string };
+type CategoryRow = Omit<CategoryDoc, "_id"> & { id: string };
 
-export function priceTable(rows: PriceRow[], currencyCodes: Set<string>): PriceTable {
+export function priceTable(rows: Pick<PackagePrice, "priceType" | "currencyCode" | "amount">[], currencyCodes: Set<string>): PriceTable {
   const table: PriceTable = { ADULT: {}, CHILD: {}, INFANT: {} };
   for (const row of rows) if (currencyCodes.has(row.currencyCode)) table[row.priceType][row.currencyCode] = row.amount;
   return table;
 }
 
-/** Published, not deleted, and sold by an active branch to an active destination. */
-const publicPackage = and(
-  eq(packages.status, "PUBLISHED"),
-  isNull(packages.deletedAt),
-  eq(branches.isActive, true),
-  eq(destinations.isActive, true),
-);
-
 const pdfLinks = (slug: string) => ({
   withLogoUrl: `${env.API_URL}/api/public/packages/${slug}/pdf?branding=with-logo`,
   withoutLogoUrl: `${env.API_URL}/api/public/packages/${slug}/pdf?branding=without-logo`,
 });
+
+/**
+ * Active branches and destinations, and every category. Packages are public only when published, not deleted,
+ * and sold by an active branch to an active destination; these small collections are resolved to id sets first.
+ */
+async function catalogLookups() {
+  const [branches, destinations, categories] = await Promise.all([
+    Branch.find({ isActive: true }).lean<BranchDoc[]>(),
+    Destination.find({ isActive: true }).lean<DestinationDoc[]>(),
+    Category.find().lean<CategoryDoc[]>(),
+  ]);
+  return {
+    branches: new Map(branches.map((row) => [row._id, withId(row)])),
+    destinations: new Map(destinations.map((row) => [row._id, withId(row)])),
+    categories: new Map(categories.map((row) => [row._id, withId(row)])),
+  };
+}
 
 // ---------------------------------------------------------------------------------------------
 // Listing
@@ -77,102 +87,105 @@ export interface PackageFilters {
   pageSize: number;
 }
 
-/** Search words, normalised like packages.search_text. */
+/** Search words, normalised like packages.searchText. */
 export const searchTerms = (q: string) => normalizeText(q).split(" ").filter(Boolean).slice(0, 8);
+
+const SORTS: Record<NonNullable<PackageFilters["sort"]>, Record<string, 1 | -1>> = {
+  recommended: { isFeatured: -1, displayOrder: 1, title: 1 },
+  // Packages without a price in the chosen currency come last either way.
+  "price-asc": { _noPrice: 1, _price: 1, title: 1 },
+  "price-desc": { _noPrice: 1, _price: -1, title: 1 },
+  "duration-asc": { durationDays: 1, title: 1 },
+  "duration-desc": { durationDays: -1, title: 1 },
+  newest: { publishedAt: -1, title: 1 },
+};
 
 export async function listPublicPackages(filters: PackageFilters) {
   const currency = filters.currency ?? env.DEFAULT_CURRENCY;
-  const adult = alias(packagePrices, "adult_price");
+  const { branches, destinations, categories } = await catalogLookups();
 
-  const priceRange =
-    filters.minPrice !== undefined || filters.maxPrice !== undefined
-      ? exists(
-          db
-            .select({ one: sql`1` })
-            .from(packagePrices)
-            .where(
-              and(
-                eq(packagePrices.packageId, packages.id),
-                eq(packagePrices.priceType, "ADULT"),
-                eq(packagePrices.currencyCode, currency),
-                filters.minPrice !== undefined ? gte(packagePrices.amount, filters.minPrice) : undefined,
-                filters.maxPrice !== undefined ? lte(packagePrices.amount, filters.maxPrice) : undefined,
-              ),
-            ),
-        )
-      : undefined;
+  const branchIds = [...branches.values()].filter((b) => !filters.branch || b.slug === filters.branch).map((b) => b.id);
+  const destinationIds = [...destinations.values()]
+    .filter((d) => (!filters.destination || d.slug === filters.destination) && (!filters.country || d.countryCode === filters.country.toUpperCase()))
+    .map((d) => d.id);
+  const category = filters.category ? [...categories.values()].find((c) => c.slug === filters.category) : undefined;
+  const terms = filters.q ? searchTerms(filters.q) : [];
+  const priceRange = filters.minPrice !== undefined || filters.maxPrice !== undefined;
 
-  const where = and(
-    publicPackage,
-    filters.branch ? eq(branches.slug, filters.branch) : undefined,
-    filters.destination ? eq(destinations.slug, filters.destination) : undefined,
-    filters.category ? eq(packageCategories.slug, filters.category) : undefined,
-    filters.country ? eq(destinations.countryCode, filters.country.toUpperCase()) : undefined,
-    filters.minDays !== undefined ? gte(packages.durationDays, filters.minDays) : undefined,
-    filters.maxDays !== undefined ? lte(packages.durationDays, filters.maxDays) : undefined,
-    filters.featured !== undefined ? eq(packages.isFeatured, filters.featured) : undefined,
-    filters.recommended !== undefined ? eq(packages.isRecommended, filters.recommended) : undefined,
-    filters.slugs?.length ? inArray(packages.slug, filters.slugs) : undefined,
-    ...(filters.q ? searchTerms(filters.q).map((term) => sql`${packages.searchText} like ${`%${escapeLike(term)}%`}`) : []),
-    priceRange,
-  );
+  const filter: Record<string, unknown> = {
+    status: "PUBLISHED",
+    deletedAt: null,
+    branchId: { $in: branchIds },
+    destinationId: { $in: destinationIds },
+    ...(filters.category && { categoryId: { $in: category ? [category.id] : [] } }),
+    ...((filters.minDays !== undefined || filters.maxDays !== undefined) && {
+      durationDays: { ...(filters.minDays !== undefined && { $gte: filters.minDays }), ...(filters.maxDays !== undefined && { $lte: filters.maxDays }) },
+    }),
+    ...(filters.featured !== undefined && { isFeatured: filters.featured }),
+    ...(filters.recommended !== undefined && { isRecommended: filters.recommended }),
+    ...(filters.slugs?.length && { slug: { $in: filters.slugs } }),
+    ...(priceRange && {
+      prices: {
+        $elemMatch: {
+          priceType: "ADULT",
+          currencyCode: currency,
+          amount: { ...(filters.minPrice !== undefined && { $gte: filters.minPrice }), ...(filters.maxPrice !== undefined && { $lte: filters.maxPrice }) },
+        },
+      },
+    }),
+    // Every search word must appear in the normalised search text (lower-case, so no case-insensitive flag needed).
+    ...(terms.length && { $and: terms.map((term) => ({ searchText: { $regex: escapeRegex(term) } })) }),
+  };
 
-  const order: SQL[] = {
-    recommended: [desc(packages.isFeatured), asc(packages.displayOrder), asc(packages.title)],
-    "price-asc": [sql`${adult.amount} asc nulls last`, asc(packages.title)],
-    "price-desc": [sql`${adult.amount} desc nulls last`, asc(packages.title)],
-    "duration-asc": [asc(packages.durationDays), asc(packages.title)],
-    "duration-desc": [desc(packages.durationDays), asc(packages.title)],
-    newest: [desc(packages.publishedAt), asc(packages.title)],
-  }[filters.sort ?? "recommended"];
-
-  const base = () =>
-    db
-      .select({ pkg: packages, branch: branches, destination: destinations, category: packageCategories })
-      .from(packages)
-      .innerJoin(branches, eq(branches.id, packages.branchId))
-      .innerJoin(destinations, eq(destinations.id, packages.destinationId))
-      .leftJoin(packageCategories, eq(packageCategories.id, packages.categoryId))
-      .leftJoin(
-        adult,
-        and(eq(adult.packageId, packages.id), eq(adult.priceType, "ADULT"), eq(adult.currencyCode, currency)),
-      );
-
-  const [rows, [{ total }]] = await Promise.all([
-    base()
-      .where(where)
-      .orderBy(...order)
-      .limit(filters.pageSize)
-      .offset((filters.page - 1) * filters.pageSize),
-    db
-      .select({ total: count() })
-      .from(packages)
-      .innerJoin(branches, eq(branches.id, packages.branchId))
-      .innerJoin(destinations, eq(destinations.id, packages.destinationId))
-      .leftJoin(packageCategories, eq(packageCategories.id, packages.categoryId))
-      .where(where),
+  const [docs, total] = await Promise.all([
+    Package.aggregate<PackageDoc>([
+      { $match: filter },
+      {
+        $addFields: {
+          _price: {
+            $let: {
+              vars: {
+                adult: {
+                  $first: {
+                    $filter: { input: "$prices", cond: { $and: [{ $eq: ["$$this.priceType", "ADULT"] }, { $eq: ["$$this.currencyCode", currency] }] } },
+                  },
+                },
+              },
+              in: "$$adult.amount",
+            },
+          },
+        },
+      },
+      { $addFields: { _noPrice: { $cond: [{ $in: [{ $type: "$_price" }, ["missing", "null"]] }, 1, 0] } } },
+      { $sort: SORTS[filters.sort ?? "recommended"] },
+      { $skip: (filters.page - 1) * filters.pageSize },
+      { $limit: filters.pageSize },
+      { $project: { _price: 0, _noPrice: 0 } },
+    ]),
+    Package.countDocuments(filter),
   ]);
 
+  const rows = docs.map((doc) => ({
+    pkg: withId(doc),
+    branch: branches.get(doc.branchId)!,
+    destination: destinations.get(doc.destinationId)!,
+    category: doc.categoryId ? (categories.get(doc.categoryId) ?? null) : null,
+  }));
   return { items: await summaries(rows), meta: pageMeta(filters.page, filters.pageSize, total) };
 }
 
 type SummaryRow = {
   pkg: PackageRow;
-  branch: typeof branches.$inferSelect;
-  destination: typeof destinations.$inferSelect;
-  category: typeof packageCategories.$inferSelect | null;
+  branch: BranchRow;
+  destination: DestinationRow;
+  category: CategoryRow | null;
 };
 
-/** Card-sized package objects, with prices and images loaded for the whole page at once. */
+/** Card-sized package objects, with images loaded for the whole page at once. */
 export async function summaries(rows: SummaryRow[]) {
-  const ids = rows.map((row) => row.pkg.id);
-  const [image, prices, currencies] = await Promise.all([
-    loadImages(db, rows.map((row) => row.pkg.heroImageId)),
-    ids.length ? db.select().from(packagePrices).where(inArray(packagePrices.packageId, ids)) : [],
-    activeCurrencies(),
-  ]);
+  const [image, currencies] = await Promise.all([loadImages(rows.map((row) => row.pkg.heroImageId)), activeCurrencies()]);
   const codes = new Set(currencies.map((currency) => currency.code));
-  return rows.map((row) => summaryDto(row, image, priceTable(prices.filter((p) => p.packageId === row.pkg.id), codes)));
+  return rows.map((row) => summaryDto(row, image, priceTable(row.pkg.prices, codes)));
 }
 
 function summaryDto({ pkg, branch, destination, category }: SummaryRow, image: (id: string | null) => ImageDto | null, prices: PriceTable) {
@@ -209,26 +222,41 @@ export type PackageSummaryDto = ReturnType<typeof summaryDto>;
 // ---------------------------------------------------------------------------------------------
 // Full package (public page, preview, admin editor, PDF)
 
-export async function loadPackageGraph(where: SQL, from: Db | Tx = db) {
-  return from.query.packages.findFirst({
-    where,
-    with: {
-      branch: true,
-      destination: true,
-      category: true,
-      images: { orderBy: [asc(packageImages.displayOrder)] },
-      highlights: { orderBy: [asc(packageHighlights.displayOrder)] },
-      inclusions: { orderBy: [asc(packageInclusions.displayOrder)] },
-      exclusions: { orderBy: [asc(packageExclusions.displayOrder)] },
-      prices: true,
-      hotels: { orderBy: [asc(packageHotels.displayOrder)], with: { hotel: true } },
-      activities: { orderBy: [asc(packageActivities.displayOrder)], with: { activity: true } },
-      itineraryDays: {
-        orderBy: [asc(itineraryDays.dayNumber)],
-        with: { hotel: true, activities: { orderBy: [asc(itineraryActivities.displayOrder)] } },
-      },
-    },
-  });
+/**
+ * A package with everything it links to: branch, destination, category, hotel options with their hotels,
+ * activities, and itinerary days with their hotel. Queries run one after another because this also runs inside
+ * transactions (the publish check), where parallel operations are not allowed.
+ */
+export async function loadPackageGraph(filter: Record<string, unknown>) {
+  const doc = await Package.findOne(filter).lean<PackageDoc>();
+  if (!doc) return undefined;
+  const branch = await Branch.findById(doc.branchId).lean<BranchDoc>();
+  const destination = await Destination.findById(doc.destinationId).lean<DestinationDoc>();
+  const category = doc.categoryId ? await Category.findById(doc.categoryId).lean<CategoryDoc>() : null;
+  const hotelIds = [...new Set([...doc.hotels.map((row) => row.hotelId), ...doc.itinerary.flatMap((day) => (day.hotelId ? [day.hotelId] : []))])];
+  const hotels = new Map((hotelIds.length ? await Hotel.find({ _id: { $in: hotelIds } }).lean<HotelDoc[]>() : []).map((row) => [row._id, withId(row)]));
+  const activities = new Map(
+    (doc.activityIds.length ? await Activity.find({ _id: { $in: doc.activityIds } }).lean<ActivityDoc[]>() : []).map((row) => [row._id, withId(row)]),
+  );
+  // References are checked on every write, so these exist; a missing one means the data is damaged.
+  if (!branch || !destination) throw new Error(`Package ${doc._id} points at a missing branch or destination`);
+
+  const pkg = withId(doc);
+  return {
+    ...pkg,
+    branch: withId(branch),
+    destination: withId(destination),
+    category: category ? withId(category) : null,
+    hotels: pkg.hotels.flatMap((row) => {
+      const hotel = hotels.get(row.hotelId);
+      return hotel ? [{ ...row, hotel }] : [];
+    }),
+    activities: pkg.activityIds.flatMap((activityId) => {
+      const activity = activities.get(activityId);
+      return activity ? [{ activityId, activity }] : [];
+    }),
+    itinerary: pkg.itinerary.map((day) => ({ ...day, hotel: day.hotelId ? (hotels.get(day.hotelId) ?? null) : null })),
+  };
 }
 
 export type PackageGraph = NonNullable<Awaited<ReturnType<typeof loadPackageGraph>>>;
@@ -247,7 +275,7 @@ export async function packageDetail(graph: PackageGraph) {
   const imageIds = [
     graph.heroImageId,
     graph.ogImageId,
-    ...graph.images.map((image) => image.mediaId),
+    ...graph.gallery,
     graph.branch.bannerImageId,
     graph.branch.thumbnailImageId,
     graph.branch.ogImageId,
@@ -256,10 +284,10 @@ export async function packageDetail(graph: PackageGraph) {
     graph.destination.ogImageId,
     ...graph.hotels.map((row) => row.hotel.primaryImageId),
     ...graph.activities.map((row) => row.activity.imageId),
-    ...graph.itineraryDays.map((day) => day.imageId),
+    ...graph.itinerary.map((day) => day.imageId),
   ];
   const [image, currencies, defaults, reviews] = await Promise.all([
-    loadImages(db, imageIds),
+    loadImages(imageIds),
     activeCurrencies(),
     getContentBlock("package.defaults"),
     testimonialsForPackages([graph.id]),
@@ -270,9 +298,9 @@ export async function packageDetail(graph: PackageGraph) {
     ...summaryDto({ pkg: graph, branch: graph.branch, destination: graph.destination, category: graph.category }, image, prices),
     overview: paragraphs(graph.description),
     bestTime: graph.bestTime,
-    gallery: graph.images.map((row) => image(row.mediaId)).filter((photo): photo is ImageDto => !!photo),
+    gallery: graph.gallery.map((mediaId) => image(mediaId)).filter((photo): photo is ImageDto => !!photo),
     highlights: graph.highlights.map(({ title, description }) => ({ title, description })),
-    itinerary: graph.itineraryDays.map((day) => ({
+    itinerary: graph.itinerary.map((day) => ({
       dayNumber: day.dayNumber,
       title: day.title,
       description: day.description,
@@ -285,7 +313,7 @@ export async function packageDetail(graph: PackageGraph) {
         title: activity.title,
         description: activity.description,
         location: activity.location,
-        type: activity.activityType,
+        type: activity.type,
       })),
     })),
     inclusions: graph.inclusions.map(({ title, description }) => ({ title, description })),
@@ -324,7 +352,7 @@ export async function packageDetail(graph: PackageGraph) {
 export type PackageDetailDto = Awaited<ReturnType<typeof packageDetail>>;
 
 export async function getPublicPackage(slug: string) {
-  const graph = await loadPackageGraph(and(eq(packages.slug, slug), eq(packages.status, "PUBLISHED"), isNull(packages.deletedAt))!);
+  const graph = await loadPackageGraph({ slug, status: "PUBLISHED", deletedAt: null });
   if (!graph || !graph.branch.isActive || !graph.destination.isActive) return null;
   return graph;
 }
@@ -338,29 +366,29 @@ export async function getPublicPackage(slug: string) {
  * position, so different pages suggest different trips.
  */
 export async function recommendations(slug: string, limit: number) {
-  const [current] = await db
-    .select({ id: packages.id, branchId: packages.branchId, destinationId: packages.destinationId })
-    .from(packages)
-    .where(eq(packages.slug, slug))
-    .limit(1);
+  const current = await Package.findOne({ slug }, { branchId: 1, destinationId: 1 }).lean<Pick<PackageDoc, "_id" | "branchId" | "destinationId">>();
   if (!current) return null;
 
-  const rows = await db
-    .select({ pkg: packages, branch: branches, destination: destinations, category: packageCategories })
-    .from(packages)
-    .innerJoin(branches, eq(branches.id, packages.branchId))
-    .innerJoin(destinations, eq(destinations.id, packages.destinationId))
-    .leftJoin(packageCategories, eq(packageCategories.id, packages.categoryId))
-    .where(and(publicPackage, ne(packages.id, current.id), ne(packages.destinationId, current.destinationId)))
-    .orderBy(desc(packages.isRecommended), asc(packages.displayOrder), asc(packages.title))
-    .limit(200);
+  const { branches, destinations, categories } = await catalogLookups();
+  const docs = await Package.find({
+    status: "PUBLISHED",
+    deletedAt: null,
+    _id: { $ne: current._id },
+    branchId: { $in: [...branches.keys()] },
+    destinationId: { $in: [...destinations.keys()], $ne: current.destinationId },
+  })
+    .sort({ isRecommended: -1, displayOrder: 1, title: 1 })
+    .limit(200)
+    .lean<PackageDoc[]>();
+  const rows = docs.map((doc) => ({
+    pkg: withId(doc),
+    branch: branches.get(doc.branchId)!,
+    destination: destinations.get(doc.destinationId)!,
+    category: doc.categoryId ? (categories.get(doc.categoryId) ?? null) : null,
+  }));
 
-  const ordered = await db
-    .select({ id: packages.id })
-    .from(packages)
-    .where(and(eq(packages.status, "PUBLISHED"), isNull(packages.deletedAt)))
-    .orderBy(asc(packages.displayOrder), asc(packages.title));
-  const offset = Math.max(0, ordered.findIndex((row) => row.id === current.id));
+  const ordered = await Package.find({ status: "PUBLISHED", deletedAt: null }, { _id: 1 }).sort({ displayOrder: 1, title: 1 }).lean<{ _id: string }[]>();
+  const offset = Math.max(0, ordered.findIndex((row) => row._id === current._id));
   const rotate = <T>(list: T[]) => (list.length ? [...list.slice(offset % list.length), ...list.slice(0, offset % list.length)] : list);
 
   const sameBranch = rotate(rows.filter((row) => row.pkg.branchId === current.branchId));

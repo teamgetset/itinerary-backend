@@ -1,13 +1,11 @@
-import { and, asc, count, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../db/client.ts";
-import { testimonials } from "../db/schema.ts";
+import { Media, Package, Testimonial, withId, type TestimonialDoc } from "../db/models.ts";
 import { pageMeta } from "../lib/http.ts";
 import { crudRoutes, nullableText, optionalId } from "./crud.ts";
 import { loadImages, type ImageDto } from "./media/dto.ts";
 import { withImages } from "./shared.ts";
 
-type TestimonialRow = typeof testimonials.$inferSelect;
+type TestimonialRow = Omit<TestimonialDoc, "_id"> & { id: string };
 
 /*
  * Reviews shown site-wide (and on a package page when linked to one).
@@ -31,22 +29,23 @@ const testimonialInput = z.object({
 export const testimonialAdminRoutes = crudRoutes({
   entity: "testimonial",
   label: "Testimonial",
-  table: testimonials,
+  model: Testimonial,
   create: testimonialInput,
   update: testimonialInput.partial(),
-  search: [testimonials.customerName, testimonials.place, testimonials.review],
-  orderBy: [asc(testimonials.displayOrder), asc(testimonials.createdAt)],
+  search: ["customerName", "place", "review"],
+  sort: { displayOrder: 1, createdAt: 1 },
   filters: (query) => [
-    query.published ? eq(testimonials.isPublished, query.published === "true") : undefined,
-    /^[1-5]$/.test(query.rating ?? "") ? eq(testimonials.rating, Number(query.rating)) : undefined,
+    query.published ? { isPublished: query.published === "true" } : undefined,
+    /^[1-5]$/.test(query.rating ?? "") ? { rating: Number(query.rating) } : undefined,
   ],
   toDto: async (rows) => {
-    const image = await loadImages(db, rows.map((row) => row.imageId));
+    const image = await loadImages(rows.map((row) => row.imageId));
     return rows.map((row) => withImages(row, image));
   },
-  deletedAt: testimonials.deletedAt,
+  refs: { imageId: Media, packageId: Package },
+  softDelete: true,
   tags: ["testimonials", "catalog"],
-  orderable: testimonials.displayOrder,
+  orderable: true,
 });
 
 export function testimonialDto(row: TestimonialRow, image: (id: string | null) => ImageDto | null) {
@@ -62,32 +61,31 @@ export function testimonialDto(row: TestimonialRow, image: (id: string | null) =
   };
 }
 
-const visible = and(eq(testimonials.isPublished, true), isNull(testimonials.deletedAt));
+const visible = { isPublished: true, deletedAt: null };
 
 export async function listPublicTestimonials(page: number, pageSize: number) {
-  const [rows, [{ total }]] = await Promise.all([
-    db
-      .select()
-      .from(testimonials)
-      .where(visible)
-      .orderBy(asc(testimonials.displayOrder), asc(testimonials.createdAt))
+  const [docs, total] = await Promise.all([
+    Testimonial.find(visible)
+      .sort({ displayOrder: 1, createdAt: 1 })
+      .skip((page - 1) * pageSize)
       .limit(pageSize)
-      .offset((page - 1) * pageSize),
-    db.select({ total: count() }).from(testimonials).where(visible),
+      .lean<TestimonialDoc[]>(),
+    Testimonial.countDocuments(visible),
   ]);
-  const image = await loadImages(db, rows.map((row) => row.imageId));
+  const rows = docs.map(withId);
+  const image = await loadImages(rows.map((row) => row.imageId));
   return { items: rows.map((row) => testimonialDto(row, image)), meta: pageMeta(page, pageSize, total) };
 }
 
 /** Published reviews linked to packages, keyed by package id. */
 export async function testimonialsForPackages(packageIds: string[]) {
   if (!packageIds.length) return new Map<string, ReturnType<typeof testimonialDto>[]>();
-  const rows = await db
-    .select()
-    .from(testimonials)
-    .where(and(visible, inArray(testimonials.packageId, packageIds)))
-    .orderBy(asc(testimonials.displayOrder));
-  const image = await loadImages(db, rows.map((row) => row.imageId));
+  const rows = (
+    await Testimonial.find({ ...visible, packageId: { $in: packageIds } })
+      .sort({ displayOrder: 1, createdAt: 1 })
+      .lean<TestimonialDoc[]>()
+  ).map(withId);
+  const image = await loadImages(rows.map((row) => row.imageId));
   const byPackage = new Map<string, ReturnType<typeof testimonialDto>[]>();
   for (const row of rows) byPackage.set(row.packageId!, [...(byPackage.get(row.packageId!) ?? []), testimonialDto(row, image)]);
   return byPackage;

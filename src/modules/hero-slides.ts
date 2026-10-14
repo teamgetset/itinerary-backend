@@ -1,7 +1,5 @@
-import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../db/client.ts";
-import { heroSlides } from "../db/schema.ts";
+import { HeroSlide, Media, withId, type HeroSlideDoc } from "../db/models.ts";
 import { crudRoutes, nullableText, safeHref } from "./crud.ts";
 import { loadImages } from "./media/dto.ts";
 import { withImages } from "./shared.ts";
@@ -23,26 +21,23 @@ const slideInput = z.object({
 export const heroSlideAdminRoutes = crudRoutes({
   entity: "hero_slide",
   label: "Hero slide",
-  table: heroSlides,
+  model: HeroSlide,
   create: slideInput,
   update: slideInput.partial(),
-  search: [heroSlides.title],
-  orderBy: [asc(heroSlides.displayOrder), asc(heroSlides.createdAt)],
+  search: ["title"],
+  sort: { displayOrder: 1, createdAt: 1 },
+  refs: { imageId: Media },
   toDto: async (rows) => {
-    const image = await loadImages(db, rows.map((row) => row.imageId));
+    const image = await loadImages(rows.map((row) => row.imageId));
     return rows.map((row) => withImages(row, image));
   },
   tags: ["hero"],
-  orderable: heroSlides.displayOrder,
+  orderable: true,
 });
 
 export async function listPublicHeroSlides() {
-  const rows = await db
-    .select()
-    .from(heroSlides)
-    .where(and(eq(heroSlides.isPublished, true)))
-    .orderBy(asc(heroSlides.displayOrder), asc(heroSlides.createdAt));
-  const image = await loadImages(db, rows.map((row) => row.imageId));
+  const rows = (await HeroSlide.find({ isPublished: true }).sort({ displayOrder: 1, createdAt: 1 }).lean<HeroSlideDoc[]>()).map(withId);
+  const image = await loadImages(rows.map((row) => row.imageId));
   return rows.map((row) => ({
     id: row.id,
     title: row.title,

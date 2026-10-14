@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { and, eq } from "drizzle-orm";
-import { packages } from "../../db/schema.ts";
 import { api, catalogue, readyPackage, signIn } from "../../test/helpers.ts";
 import { loadPackageGraph, packageDetail } from "../packages/read.ts";
 import { itineraryHtml } from "./template.ts";
@@ -18,7 +16,7 @@ const download = async (branding: string) => {
 };
 
 test("both prints come from one template; only the logo differs", async () => {
-  const graph = await loadPackageGraph(and(eq(packages.id, pkg.id))!);
+  const graph = await loadPackageGraph({ _id: pkg.id });
   const detail = await packageDetail(graph!);
   const meta = { version: 1, updatedAt: new Date("2026-10-06"), currencies: [{ code: "INR", symbol: "₹", locale: "en-IN" }], siteUrl: "http://site.test" };
   const images = { logo: "data:image/png;base64,LOGO", hero: null, gallery: [] };

@@ -1,17 +1,17 @@
+import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { and, count, desc, eq, ilike, isNull, or } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../../db/client.ts";
-import { media } from "../../db/schema.ts";
+import { Media, defined, type MediaDoc } from "../../db/models.ts";
 import { AppError, badRequest, notFound } from "../../lib/errors.ts";
 import { idParam, ok, pageMeta, pageQuery, readBody, readQuery, type AppEnv } from "../../lib/http.ts";
 import { log } from "../../lib/logger.ts";
-import { escapeLike } from "../../lib/text.ts";
+import { contains } from "../../lib/text.ts";
 import { requireRole } from "../auth/middleware.ts";
 import { audit } from "../audit.ts";
-import { IMAGE_MAX_BYTES, newKey, safeFileName, sniffImage, storage } from "../storage.ts";
+import { IMAGE_MAX_BYTES, safeFileName, sniffImage } from "../storage.ts";
 import { mediaDto } from "./dto.ts";
+import { discardImage, storeImage, type StoredImage } from "./store.ts";
 
 /* The media library: upload once, reuse anywhere (packages, branches, hero slides...). */
 
@@ -29,25 +29,23 @@ const listQuery = pageQuery.extend({
 export const mediaAdminRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const query = readQuery(c, listQuery);
-    const where = and(
-      isNull(media.deletedAt),
-      eq(media.kind, query.kind),
-      query.q ? or(ilike(media.fileName, `%${escapeLike(query.q)}%`), ilike(media.altText, `%${escapeLike(query.q)}%`)) : undefined,
-    );
-    const [rows, [{ total }]] = await Promise.all([
-      db
-        .select()
-        .from(media)
-        .where(where)
-        .orderBy(desc(media.createdAt))
+    const filter = {
+      deletedAt: null,
+      kind: query.kind,
+      ...(query.q && { $or: [{ fileName: contains(query.q) }, { altText: contains(query.q) }] }),
+    };
+    const [rows, total] = await Promise.all([
+      Media.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((query.page - 1) * query.pageSize)
         .limit(query.pageSize)
-        .offset((query.page - 1) * query.pageSize),
-      db.select({ total: count() }).from(media).where(where),
+        .lean<MediaDoc[]>(),
+      Media.countDocuments(filter),
     ]);
     return ok(c, rows.map(mediaDto), pageMeta(query.page, query.pageSize, total));
   })
   .get("/:id", async (c) => {
-    const [row] = await db.select().from(media).where(eq(media.id, idParam(c))).limit(1);
+    const row = await Media.findById(idParam(c)).lean<MediaDoc>();
     if (!row) throw notFound("File");
     return ok(c, mediaDto(row));
   })
@@ -80,40 +78,55 @@ export const mediaAdminRoutes = new Hono<AppEnv>()
         .object({ alt: z.string().trim().max(250).optional(), focalPoint })
         .parse({ alt: form.alt || undefined, focalPoint: form.focalPoint || undefined });
 
-      const key = newKey("images", type.ext);
+      const id = randomUUID();
+      let stored: StoredImage;
       try {
-        await storage.put(key, data, type.mime);
+        stored = await storeImage(id, data, type);
       } catch (error) {
         log.error("media.upload_failed", { error });
         throw new AppError(502, "STORAGE_ERROR", "The file could not be stored. Please try again.");
       }
       const admin = c.get("admin");
       const fileName = safeFileName(file.name, type.ext).replace(/\.[a-z0-9]+$/i, "") + `.${type.ext}`;
-      const [row] = await db
-        .insert(media)
-        .values({ kind: "IMAGE", storageKey: key, fileName, mimeType: type.mime, sizeBytes: data.length, altText: meta.alt ?? "", focalPoint: meta.focalPoint ?? null, uploadedById: admin.id })
-        .returning();
-      await audit(db, admin, "MEDIA_UPLOADED", "media", row!.id, { fileName });
-      return ok(c, mediaDto(row!), undefined, 201);
+      const row = await Media.create({
+        _id: id,
+        kind: "IMAGE",
+        storageKey: stored.storageKey,
+        cloudinary: stored.cloudinary,
+        fileName,
+        mimeType: type.mime,
+        sizeBytes: data.length,
+        altText: meta.alt ?? "",
+        focalPoint: meta.focalPoint ?? null,
+        uploadedById: admin.id,
+      }).then(
+        (created) => created.toObject() as MediaDoc,
+        async (error) => {
+          // The file is stored but its record is not: remove the file rather than leave an orphan.
+          await discardImage(stored);
+          throw error;
+        },
+      );
+      await audit(admin, "MEDIA_UPLOADED", "media", row._id, { fileName });
+      return ok(c, mediaDto(row), undefined, 201);
     },
   )
   .patch("/:id", requireRole("EDITOR"), async (c) => {
     const id = idParam(c);
     const input = await readBody(c, z.object({ alt: z.string().trim().max(250).optional(), focalPoint }));
-    const [row] = await db
-      .update(media)
-      .set({ ...(input.alt !== undefined && { altText: input.alt }), ...(input.focalPoint !== undefined && { focalPoint: input.focalPoint }) })
-      .where(eq(media.id, id))
-      .returning();
+    const fields = defined({ altText: input.alt, focalPoint: input.focalPoint });
+    const row = Object.keys(fields).length
+      ? await Media.findOneAndUpdate({ _id: id }, { $set: fields }, { returnDocument: "after" }).lean<MediaDoc>()
+      : await Media.findById(id).lean<MediaDoc>();
     if (!row) throw notFound("File");
-    await audit(db, c.get("admin"), "MEDIA_UPDATED", "media", id);
+    await audit(c.get("admin"), "MEDIA_UPDATED", "media", id);
     return ok(c, mediaDto(row));
   })
   /** Archive: the file stays reachable where it is already used, but leaves the library. */
   .delete("/:id", requireRole("ADMIN"), async (c) => {
     const id = idParam(c);
-    const [row] = await db.update(media).set({ deletedAt: new Date() }).where(and(eq(media.id, id), isNull(media.deletedAt))).returning({ id: media.id });
-    if (!row) throw notFound("File");
-    await audit(db, c.get("admin"), "MEDIA_ARCHIVED", "media", id);
+    const archived = await Media.updateOne({ _id: id, deletedAt: null }, { $set: { deletedAt: new Date() } });
+    if (!archived.matchedCount) throw notFound("File");
+    await audit(c.get("admin"), "MEDIA_ARCHIVED", "media", id);
     return ok(c, { id, deleted: true });
   });

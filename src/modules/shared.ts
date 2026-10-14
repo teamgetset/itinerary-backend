@@ -1,8 +1,6 @@
-import { and, like, ne } from "drizzle-orm";
-import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
+import type { Model } from "mongoose";
 import { z } from "zod";
-import type { Db, Tx } from "../db/client.ts";
-import { SLUG_PATTERN, escapeLike, slugSchemaMessage, slugify } from "../lib/text.ts";
+import { SLUG_PATTERN, escapeRegex, slugSchemaMessage, slugify } from "../lib/text.ts";
 import { nullableText, optionalId } from "./crud.ts";
 import type { ImageDto } from "./media/dto.ts";
 
@@ -40,19 +38,13 @@ export const seoDto = (row: SeoRow, image: (id: string | null) => ImageDto | nul
 });
 
 /** "bali-island-escape", or "bali-island-escape-2" when taken. */
-export async function uniqueSlug(
-  db: Db | Tx,
-  table: PgTable & { id: PgColumn },
-  slugColumn: PgColumn,
-  wanted: string,
-  excludeId?: string,
-) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function uniqueSlug(model: Model<any>, wanted: string, excludeId?: string) {
   const base = slugify(wanted) || "item";
-  const rows = await db
-    .select({ slug: slugColumn })
-    .from(table as PgTable)
-    .where(and(like(slugColumn, `${escapeLike(base)}%`), excludeId ? ne(table.id, excludeId) : undefined));
-  const taken = new Set(rows.map((row) => row.slug as string));
+  const rows = await model
+    .find({ slug: { $regex: `^${escapeRegex(base)}` }, ...(excludeId && { _id: { $ne: excludeId } }) }, { slug: 1 })
+    .lean<{ slug: string }[]>();
+  const taken = new Set(rows.map((row) => row.slug));
   if (!taken.has(base)) return base;
   for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
 }

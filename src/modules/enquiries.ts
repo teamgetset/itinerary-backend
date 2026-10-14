@@ -1,13 +1,12 @@
 import { Hono } from "hono";
-import { and, count, desc, eq, ilike, or } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { db } from "../db/client.ts";
-import { adminUsers, branches, enquiries, enquiryNotes, packages } from "../db/schema.ts";
+import { AdminUser, Branch, ENQUIRY_STATUSES, Enquiry, Package, defined, withId, type EnquiryDoc } from "../db/models.ts";
 import { AppError, notFound } from "../lib/errors.ts";
 import { idParam, ok, pageMeta, pageQuery, readBody, readQuery, type AppEnv } from "../lib/http.ts";
 import { log } from "../lib/logger.ts";
 import { rateLimiter } from "../lib/rate-limit.ts";
-import { escapeLike } from "../lib/text.ts";
+import { contains } from "../lib/text.ts";
 import { audit } from "./audit.ts";
 import { activeCurrencies } from "./currencies.ts";
 import { getPublicPackage, priceTable } from "./packages/read.ts";
@@ -15,7 +14,7 @@ import { calculateTotal, travellersInput } from "./pricing.ts";
 
 /* Leads from the website. Public visitors create them; staff track them through to a booking. */
 
-const STATUSES = ["NEW", "CONTACTED", "IN_PROGRESS", "CONVERTED", "CLOSED"] as const;
+const STATUSES = ENQUIRY_STATUSES;
 const phone = z
   .string()
   .trim()
@@ -72,13 +71,11 @@ export async function createEnquiry(input: z.infer<typeof enquiryInput>, ip: str
       }
     }
   } else if (input.branchSlug) {
-    const [branch] = await db.select({ id: branches.id }).from(branches).where(eq(branches.slug, input.branchSlug)).limit(1);
-    branchId = branch?.id ?? null;
+    const branch = await Branch.findOne({ slug: input.branchSlug }, { _id: 1 }).lean<{ _id: string }>();
+    branchId = branch?._id ?? null;
   }
 
-  const [row] = await db
-    .insert(enquiries)
-    .values({
+  const created = await Enquiry.create({
       name: input.name,
       email: input.email ?? null,
       phone: input.phone,
@@ -92,11 +89,10 @@ export async function createEnquiry(input: z.infer<typeof enquiryInput>, ip: str
       currencyCode,
       estimatedTotal,
       message: input.message ?? null,
-    })
-    .returning({ id: enquiries.id });
+  });
   // No names or contact details in logs.
-  log.info("enquiry.created", { enquiryId: row!.id, packageId, branchId });
-  return { id: row!.id };
+  log.info("enquiry.created", { enquiryId: created._id, packageId, branchId });
+  return { id: created._id as string };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -109,79 +105,77 @@ const listQuery = pageQuery.extend({
   packageId: z.uuid().optional(),
 });
 
-const enquiryColumns = {
-  enquiry: enquiries,
-  package: { id: packages.id, title: packages.title, slug: packages.slug },
-  branch: { id: branches.id, name: branches.name },
-};
+type EnquiryRow = Omit<EnquiryDoc, "_id" | "notes"> & { id: string };
+
+/** An enquiry as the admin sees it: its fields plus the package and branch it came from. */
+async function withLinks(docs: EnquiryDoc[]) {
+  const ids = (field: "packageId" | "branchId") => [...new Set(docs.map((doc) => doc[field]).filter((id): id is string => !!id))];
+  const [packages, branches] = await Promise.all([
+    Package.find({ _id: { $in: ids("packageId") } }, { title: 1, slug: 1 }).lean<{ _id: string; title: string; slug: string }[]>(),
+    Branch.find({ _id: { $in: ids("branchId") } }, { name: 1 }).lean<{ _id: string; name: string }[]>(),
+  ]);
+  return docs.map((doc) => {
+    const { notes: _notes, ...enquiry }: EnquiryRow & { notes: unknown } = withId(doc);
+    const pkg = packages.find((row) => row._id === doc.packageId);
+    const branch = branches.find((row) => row._id === doc.branchId);
+    return {
+      ...enquiry,
+      package: pkg ? { id: pkg._id, title: pkg.title, slug: pkg.slug } : null,
+      branch: branch ? { id: branch._id, name: branch.name } : null,
+    };
+  });
+}
 
 export const enquiryAdminRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const query = readQuery(c, listQuery);
-    const like = query.q ? `%${escapeLike(query.q)}%` : null;
-    const where = and(
-      query.status ? eq(enquiries.status, query.status) : undefined,
-      query.branchId ? eq(enquiries.branchId, query.branchId) : undefined,
-      query.packageId ? eq(enquiries.packageId, query.packageId) : undefined,
-      like
-        ? or(
-            ilike(enquiries.name, like),
-            ilike(enquiries.email, like),
-            ilike(enquiries.phone, like),
-            ilike(enquiries.whatsapp, like),
-            ilike(packages.title, like),
-          )
-        : undefined,
-    );
-    const [rows, [{ total }]] = await Promise.all([
-      db
-        .select(enquiryColumns)
-        .from(enquiries)
-        .leftJoin(packages, eq(packages.id, enquiries.packageId))
-        .leftJoin(branches, eq(branches.id, enquiries.branchId))
-        .where(where)
-        .orderBy(desc(enquiries.createdAt))
+    const filter: Record<string, unknown> = defined({ status: query.status, branchId: query.branchId, packageId: query.packageId });
+    if (query.q) {
+      const packages = await Package.find({ title: contains(query.q) }, { _id: 1 }).lean<{ _id: string }[]>();
+      filter.$or = [
+        { name: contains(query.q) },
+        { email: contains(query.q) },
+        { phone: contains(query.q) },
+        { whatsapp: contains(query.q) },
+        { packageId: { $in: packages.map((row) => row._id) } },
+      ];
+    }
+    const [docs, total] = await Promise.all([
+      Enquiry.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((query.page - 1) * query.pageSize)
         .limit(query.pageSize)
-        .offset((query.page - 1) * query.pageSize),
-      db.select({ total: count() }).from(enquiries).leftJoin(packages, eq(packages.id, enquiries.packageId)).where(where),
+        .lean<EnquiryDoc[]>(),
+      Enquiry.countDocuments(filter),
     ]);
-    const items = rows.map(({ enquiry, package: pkg, branch }) => ({ ...enquiry, package: pkg?.id ? pkg : null, branch: branch?.id ? branch : null }));
-    return ok(c, items, pageMeta(query.page, query.pageSize, total));
+    return ok(c, await withLinks(docs), pageMeta(query.page, query.pageSize, total));
   })
   .get("/:id", async (c) => {
-    const id = idParam(c);
-    const [row] = await db
-      .select(enquiryColumns)
-      .from(enquiries)
-      .leftJoin(packages, eq(packages.id, enquiries.packageId))
-      .leftJoin(branches, eq(branches.id, enquiries.branchId))
-      .where(eq(enquiries.id, id))
-      .limit(1);
-    if (!row) throw notFound("Enquiry");
-    const notes = await db
-      .select({ id: enquiryNotes.id, body: enquiryNotes.body, createdAt: enquiryNotes.createdAt, author: adminUsers.name })
-      .from(enquiryNotes)
-      .leftJoin(adminUsers, eq(adminUsers.id, enquiryNotes.adminUserId))
-      .where(eq(enquiryNotes.enquiryId, id))
-      .orderBy(desc(enquiryNotes.createdAt));
-    return ok(c, { ...row.enquiry, package: row.package?.id ? row.package : null, branch: row.branch?.id ? row.branch : null, notes });
+    const doc = await Enquiry.findById(idParam(c)).lean<EnquiryDoc>();
+    if (!doc) throw notFound("Enquiry");
+    const [enquiry] = await withLinks([doc]);
+    const authors = await AdminUser.find({ _id: { $in: doc.notes.map((note) => note.adminUserId).filter(Boolean) } }, { name: 1 }).lean<{ _id: string; name: string }[]>();
+    const notes = [...doc.notes]
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .map((note) => ({ id: note._id, body: note.body, createdAt: note.createdAt, author: authors.find((a) => a._id === note.adminUserId)?.name ?? null }));
+    return ok(c, { ...enquiry, notes });
   })
   .patch("/:id", async (c) => {
     const id = idParam(c);
     const { status } = await readBody(c, z.object({ status: z.enum(STATUSES) }));
-    const [row] = await db.update(enquiries).set({ status }).where(eq(enquiries.id, id)).returning({ id: enquiries.id });
-    if (!row) throw notFound("Enquiry");
-    await audit(db, c.get("admin"), "ENQUIRY_STATUS_CHANGED", "enquiry", id, { status });
+    const updated = await Enquiry.updateOne({ _id: id }, { $set: { status } });
+    if (!updated.matchedCount) throw notFound("Enquiry");
+    await audit(c.get("admin"), "ENQUIRY_STATUS_CHANGED", "enquiry", id, { status });
     return ok(c, { id, status });
   })
   .post("/:id/notes", async (c) => {
     const id = idParam(c);
     const { body } = await readBody(c, z.object({ body: z.string().trim().min(1, "Write a note.").max(4000) }));
-    const [exists] = await db.select({ id: enquiries.id }).from(enquiries).where(eq(enquiries.id, id)).limit(1);
-    if (!exists) throw notFound("Enquiry");
     const admin = c.get("admin");
-    const [note] = await db.insert(enquiryNotes).values({ enquiryId: id, adminUserId: admin.id, body }).returning();
-    await db.update(enquiries).set({ updatedAt: new Date() }).where(eq(enquiries.id, id));
-    await audit(db, admin, "ENQUIRY_NOTE_ADDED", "enquiry", id);
-    return ok(c, { ...note, author: admin.name }, undefined, 201);
+    const note = { _id: randomUUID(), adminUserId: admin.id, body, createdAt: new Date() };
+    // Adding a note also marks the enquiry as updated.
+    const updated = await Enquiry.updateOne({ _id: id }, { $push: { notes: note } });
+    if (!updated.matchedCount) throw notFound("Enquiry");
+    await audit(admin, "ENQUIRY_NOTE_ADDED", "enquiry", id);
+    return ok(c, { id: note._id, enquiryId: id, adminUserId: admin.id, body, createdAt: note.createdAt, author: admin.name }, undefined, 201);
   });

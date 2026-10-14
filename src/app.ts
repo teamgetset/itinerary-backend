@@ -2,9 +2,8 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { bodyLimit } from "hono/body-limit";
-import { sql } from "drizzle-orm";
 import { env } from "./config/env.ts";
-import { db } from "./db/client.ts";
+import { pingDb } from "./db/client.ts";
 import { AppError } from "./lib/errors.ts";
 import type { AppEnv } from "./lib/http.ts";
 import { log } from "./lib/logger.ts";
@@ -13,51 +12,28 @@ import { adminRoutes } from "./modules/admin-routes.ts";
 import { publicRoutes } from "./modules/public-routes.ts";
 import { mediaFileRoutes } from "./modules/media/files.ts";
 
-/** PostgreSQL error codes worth turning into client errors. */
-const PG = {
-  uniqueViolation: "23505",
-  foreignKeyViolation: "23503",
-  /** Deleting a row that an ON DELETE RESTRICT key still points at. */
-  restrictViolation: "23001",
-  checkViolation: "23514",
-  invalidText: "22P02",
-};
-
-const IN_USE = () => new AppError(409, "IN_USE", "This is still used elsewhere. Remove those links first, or switch it off instead.");
-
-/** Friendly field names for unique constraints, so forms can point at the right input. */
-function uniqueField(constraint = "") {
-  if (constraint.includes("slug")) return { path: "slug", message: "This slug is already in use" };
-  if (constraint.includes("email")) return { path: "email", message: "This email is already in use" };
-  if (constraint.startsWith("currencies_pkey")) return { path: "code", message: "This currency already exists" };
+/** Friendly field names for unique indexes, so forms can point at the right input. */
+function uniqueField(field = "") {
+  if (field === "slug") return { path: "slug", message: "This slug is already in use" };
+  if (field === "email") return { path: "email", message: "This email is already in use" };
+  // Currencies are keyed by their code.
+  if (field === "_id") return { path: "code", message: "This currency already exists" };
   return { path: "", message: "This already exists" };
 }
 
+/** Database errors worth turning into client errors (references and IN_USE are checked by the services). */
 function toAppError(error: unknown): AppError | null {
   if (error instanceof AppError) return error;
-  // Drizzle wraps driver errors (twice inside transactions): find the PostgreSQL error in the cause chain.
-  let pg = error as { code?: unknown; constraint?: string; detail?: string; cause?: unknown } | undefined;
-  for (let depth = 0; pg && !(typeof pg.code === "string" && /^[0-9A-Z]{5}$/.test(pg.code)) && depth < 4; depth++) {
-    pg = pg.cause as typeof pg;
+  const e = error as { name?: string; code?: unknown; keyPattern?: Record<string, unknown>; errors?: Record<string, { path: string; message: string }> };
+  if (e?.code === 11000) {
+    const field = uniqueField(Object.keys(e.keyPattern ?? {})[0]);
+    return new AppError(409, "CONFLICT", field.message, [field]);
   }
-  switch (pg?.code) {
-    case PG.uniqueViolation: {
-      const field = uniqueField(pg.constraint);
-      return new AppError(409, "CONFLICT", field.message, [field]);
-    }
-    case PG.restrictViolation:
-      return IN_USE();
-    case PG.foreignKeyViolation:
-      return pg.detail?.includes("referenced from")
-        ? IN_USE()
-        : new AppError(400, "INVALID_REFERENCE", "A linked record does not exist");
-    case PG.checkViolation:
-      return new AppError(400, "CONSTRAINT_VIOLATION", "A value is outside the allowed range", [{ path: "", message: pg.constraint }]);
-    case PG.invalidText:
-      return new AppError(400, "INVALID_VALUE", "A value has the wrong format");
-    default:
-      return null;
+  if (e?.name === "ValidationError") {
+    return new AppError(400, "CONSTRAINT_VIOLATION", "A value is outside the allowed range", Object.values(e.errors ?? {}).map(({ path, message }) => ({ path, message })));
   }
+  if (e?.name === "CastError") return new AppError(400, "INVALID_VALUE", "A value has the wrong format");
+  return null;
 }
 
 export function createApp() {
@@ -97,7 +73,7 @@ export function createApp() {
   });
 
   app.get("/health", async (c) => {
-    await db.execute(sql`select 1`);
+    await pingDb();
     return c.json({ success: true, data: { status: "ok" } });
   });
 

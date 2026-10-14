@@ -1,9 +1,7 @@
 import { Hono } from "hono";
-import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { env } from "../config/env.ts";
-import { db } from "../db/client.ts";
-import { currencies } from "../db/schema.ts";
+import { Currency, defined, type CurrencyDoc } from "../db/models.ts";
 import { badRequest, notFound } from "../lib/errors.ts";
 import { ok, readBody, type AppEnv } from "../lib/http.ts";
 import { requireRole } from "./auth/middleware.ts";
@@ -15,7 +13,10 @@ import { revalidate } from "./revalidate.ts";
  * there are no exchange rates anywhere. A currency can be switched off, not deleted, so old prices stay valid.
  */
 
-export type CurrencyRow = typeof currencies.$inferSelect;
+/** A currency with its code (stored as the document id). */
+export type CurrencyRow = Omit<CurrencyDoc, "_id"> & { code: string };
+
+const toRow = ({ _id, ...rest }: CurrencyDoc): CurrencyRow => ({ code: _id, ...rest });
 
 const currencyInput = z.object({
   code: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "ISO 4217 code, e.g. AED"),
@@ -47,20 +48,20 @@ export const currencyDto = (row: CurrencyRow) => ({
 });
 
 export async function activeCurrencies() {
-  return db.select().from(currencies).where(eq(currencies.isActive, true)).orderBy(asc(currencies.displayOrder), asc(currencies.code));
+  return (await Currency.find({ isActive: true }).sort({ displayOrder: 1, _id: 1 }).lean<CurrencyDoc[]>()).map(toRow);
 }
 
 export const currencyAdminRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
-    const rows = await db.select().from(currencies).orderBy(asc(currencies.displayOrder), asc(currencies.code));
-    return ok(c, rows.map(currencyDto));
+    const rows = await Currency.find().sort({ displayOrder: 1, _id: 1 }).lean<CurrencyDoc[]>();
+    return ok(c, rows.map(toRow).map(currencyDto));
   })
   .post("/", requireRole("ADMIN"), async (c) => {
-    const input = await readBody(c, currencyInput);
-    const [row] = await db.insert(currencies).values(input).returning();
-    await audit(db, c.get("admin"), "CURRENCY_CREATED", "currency", row!.code);
+    const { code, ...input } = await readBody(c, currencyInput);
+    const created = await Currency.create({ _id: code, ...defined(input) });
+    await audit(c.get("admin"), "CURRENCY_CREATED", "currency", code);
     revalidate("catalog");
-    return ok(c, currencyDto(row!), undefined, 201);
+    return ok(c, currencyDto(toRow(created.toObject() as CurrencyDoc)), undefined, 201);
   })
   .patch("/:code", requireRole("ADMIN"), async (c) => {
     const code = c.req.param("code").toUpperCase();
@@ -68,9 +69,12 @@ export const currencyAdminRoutes = new Hono<AppEnv>()
     if (input.isActive === false && code === env.DEFAULT_CURRENCY) {
       throw badRequest("DEFAULT_CURRENCY", `${code} is the default currency (DEFAULT_CURRENCY) and cannot be switched off`);
     }
-    const [row] = await db.update(currencies).set(input).where(eq(currencies.code, code)).returning();
+    const fields = defined(input);
+    const row = Object.keys(fields).length
+      ? await Currency.findOneAndUpdate({ _id: code }, { $set: fields }, { returnDocument: "after" }).lean<CurrencyDoc>()
+      : await Currency.findById(code).lean<CurrencyDoc>();
     if (!row) throw notFound("Currency");
-    await audit(db, c.get("admin"), "CURRENCY_UPDATED", "currency", code, { fields: Object.keys(input) });
+    await audit(c.get("admin"), "CURRENCY_UPDATED", "currency", code, { fields: Object.keys(input) });
     revalidate("catalog");
-    return ok(c, currencyDto(row));
+    return ok(c, currencyDto(toRow(row)));
   });

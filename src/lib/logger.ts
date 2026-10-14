@@ -9,13 +9,20 @@ const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
 type Level = keyof typeof LEVELS;
 type Fields = Record<string, unknown>;
 
-const SECRET_KEY = /pass(word)?|token|secret|authorization|cookie|hash/i;
+const SECRET_KEY = /pass(word)?|token|secret|authorization|cookie|hash|uri|api_?key|connection_?string/i;
+/** Credentials inside connection strings, e.g. in a driver error message. */
+const CREDENTIALS_IN_URL = /([a-z+]+:\/\/)[^\s/@:]+:[^\s/@]+@/gi;
+const scrub = (text?: string) => text?.replace(CREDENTIALS_IN_URL, "$1[redacted]@");
+
+/** An error's message with any connection-string credentials removed, for scripts that print errors. */
+export const safeMessage = (error: unknown) => scrub(error instanceof Error ? error.message : String(error)) ?? "";
 
 function clean(value: unknown, key = ""): unknown {
   if (SECRET_KEY.test(key)) return "[redacted]";
   if (value instanceof Error) {
-    return { name: value.name, message: value.message, ...(!isProduction && { stack: value.stack }) };
+    return { name: value.name, message: scrub(value.message), ...(!isProduction && { stack: scrub(value.stack) }) };
   }
+  if (typeof value === "string") return scrub(value);
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, clean(v, k)]));
   }

@@ -1,7 +1,6 @@
-import { asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../db/client.ts";
-import { activities, activityPrices, hotels, packageCategories, packages } from "../db/schema.ts";
+import { Activity, Category, Currency, Destination, Hotel, Media, Package, type ActivityDoc } from "../db/models.ts";
+import { invalidReference } from "../lib/errors.ts";
 import { refreshSearchText } from "./packages/search-text.ts";
 import { crudRoutes, nullableText, optionalId } from "./crud.ts";
 import { loadImages } from "./media/dto.ts";
@@ -21,17 +20,20 @@ const categoryInput = z.object({
 export const categoryAdminRoutes = crudRoutes({
   entity: "package_category",
   label: "Category",
-  table: packageCategories,
+  model: Category,
   create: categoryInput,
   update: categoryInput.partial(),
-  search: [packageCategories.name],
-  orderBy: [asc(packageCategories.displayOrder), asc(packageCategories.name)],
+  search: ["name"],
+  sort: { displayOrder: 1, name: 1 },
   toDto: async (rows) => rows,
-  prepare: async (data, existing) =>
-    !existing && !data.slug ? { ...data, slug: await uniqueSlug(db, packageCategories, packageCategories.slug, data.name) } : data,
-  afterSave: (tx, id) => refreshSearchText(tx, eq(packages.categoryId, id)),
+  prepare: async (data, existing) => (!existing && !data.slug ? { ...data, slug: await uniqueSlug(Category, data.name) } : data),
+  // Packages keep working without a category.
+  onDelete: async (id) => {
+    await Package.updateMany({ categoryId: id }, { $set: { categoryId: null } });
+  },
+  afterSave: (id) => refreshSearchText({ categoryId: id }),
   tags: ["catalog"],
-  orderable: packageCategories.displayOrder,
+  orderable: true,
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -52,18 +54,23 @@ const hotelInput = z.object({
 export const hotelAdminRoutes = crudRoutes({
   entity: "hotel",
   label: "Hotel",
-  table: hotels,
+  model: Hotel,
   create: hotelInput,
   update: hotelInput.partial(),
-  search: [hotels.name, hotels.location],
-  orderBy: [asc(hotels.name)],
-  filters: (query) => [query.active ? eq(hotels.isActive, query.active === "true") : undefined],
+  search: ["name", "location"],
+  sort: { name: 1 },
+  filters: (query) => [query.active ? { isActive: query.active === "true" } : undefined],
   toDto: async (rows) => {
-    const image = await loadImages(db, rows.map((row) => row.primaryImageId));
+    const image = await loadImages(rows.map((row) => row.primaryImageId));
     return rows.map((row) => withImages(row, image));
   },
-  prepare: async (data, existing) =>
-    !existing && !data.slug ? { ...data, slug: await uniqueSlug(db, hotels, hotels.slug, data.name) } : data,
+  prepare: async (data, existing) => (!existing && !data.slug ? { ...data, slug: await uniqueSlug(Hotel, data.name) } : data),
+  refs: { primaryImageId: Media },
+  // A hotel offered by a package cannot be deleted; itinerary days that stay there just lose the link.
+  inUse: async (id) => !!(await Package.exists({ "hotels.hotelId": id })),
+  onDelete: async (id) => {
+    await Package.updateMany({ "itinerary.hotelId": id }, { $set: { "itinerary.$[day].hotelId": null } }, { arrayFilters: [{ "day.hotelId": id }] });
+  },
   tags: ["catalog"],
 });
 
@@ -88,41 +95,44 @@ const activityInput = z.object({
     .optional(),
 });
 
-export async function activityDtos(rows: (typeof activities.$inferSelect)[]) {
-  const ids = rows.map((row) => row.id);
-  const [image, prices] = await Promise.all([
-    loadImages(db, rows.map((row) => row.imageId)),
-    ids.length ? db.select().from(activityPrices).where(inArray(activityPrices.activityId, ids)) : [],
-  ]);
+type ActivityRow = Omit<ActivityDoc, "_id"> & { id: string };
+
+export async function activityDtos(rows: ActivityRow[]) {
+  const image = await loadImages(rows.map((row) => row.imageId));
   return rows.map((row) => ({
     ...row,
     image: image(row.imageId),
-    prices: Object.fromEntries(prices.filter((p) => p.activityId === row.id).map((p) => [p.currencyCode, p.amount])),
+    prices: Object.fromEntries(row.prices.map((p) => [p.currencyCode, p.amount])),
   }));
 }
 
 export const activityAdminRoutes = crudRoutes({
   entity: "activity",
   label: "Activity",
-  table: activities,
+  model: Activity,
   create: activityInput,
   update: activityInput.partial(),
-  search: [activities.name, activities.location],
-  orderBy: [asc(activities.displayOrder), asc(activities.name)],
-  filters: (query) => [query.destinationId ? eq(activities.destinationId, query.destinationId) : undefined],
-  toDto: (rows) => activityDtos(rows as (typeof activities.$inferSelect)[]),
-  childFields: ["prices"],
-  prepare: async (data, existing) =>
-    !existing && !data.slug ? { ...data, slug: await uniqueSlug(db, activities, activities.slug, data.name) } : data,
-  afterSave: async (tx, id, data) => {
-    if (!data.prices) return;
-    await tx.delete(activityPrices).where(eq(activityPrices.activityId, id));
-    if (data.prices.length) {
-      await tx.insert(activityPrices).values(
-        data.prices.map((p: { currencyCode: string; amount: number }) => ({ activityId: id, ...p })),
-      );
+  search: ["name", "location"],
+  sort: { displayOrder: 1, name: 1 },
+  filters: (query) => [query.destinationId ? { destinationId: query.destinationId } : undefined],
+  toDto: (rows) => activityDtos(rows as ActivityRow[]),
+  prepare: async (data, existing) => {
+    if (data.prices?.length) {
+      const codes = data.prices.map((p: { currencyCode: string }) => p.currencyCode);
+      if ((await Currency.countDocuments({ _id: { $in: codes } })) !== codes.length) throw invalidReference("prices");
     }
+    return !existing && !data.slug ? { ...data, slug: await uniqueSlug(Activity, data.name) } : data;
+  },
+  refs: { imageId: Media, destinationId: Destination },
+  // An activity a package offers cannot be deleted; timeline entries that mention it just lose the link.
+  inUse: async (id) => !!(await Package.exists({ activityIds: id })),
+  onDelete: async (id) => {
+    await Package.updateMany(
+      { "itinerary.activities.activityId": id },
+      { $set: { "itinerary.$[].activities.$[entry].activityId": null } },
+      { arrayFilters: [{ "entry.activityId": id }] },
+    );
   },
   tags: ["catalog"],
-  orderable: activities.displayOrder,
+  orderable: true,
 });

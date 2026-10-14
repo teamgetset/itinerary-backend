@@ -1,3 +1,4 @@
+/* LEGACY (pre-MongoDB): kept for the `pg:*` scripts until the migration is signed off. */
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
@@ -22,8 +23,8 @@ import {
 } from "drizzle-orm/pg-core";
 
 /*
- * The GETSET content model. Changes here go through `npm run db:generate` (creates a SQL migration),
- * `npm run db:migrate` (applies it) and `npm run db:verify` (checks the live database matches this file).
+ * The GETSET content model. Changes here go through `npm run pg:generate` (creates a SQL migration),
+ * `npm run pg:migrate` (applies it) and `npm run pg:verify` (checks the live database matches this file).
  * See docs/DATABASE.md.
  */
 

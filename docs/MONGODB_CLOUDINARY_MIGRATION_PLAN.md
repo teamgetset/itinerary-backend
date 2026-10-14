@@ -872,3 +872,25 @@ Read-only apart from the new checklist document; nothing deployed, committed or 
 - **Memory:** in the Render image under a hard 512 MB limit, one Node process + Chromium printed all 24 PDFs with a
   477 MB peak (460 MB under 1 GB); with an extra process in the container Chromium was killed for lack of memory.
   Recommendation: an instance above 512 MB (checklist, section 9). Docker images removed and Colima stopped afterwards.
+
+### Itinerary PDFs: uploaded instead of generated (2026-10-14, code only; not committed or deployed)
+
+The owner decided that GETSET does not need server-side PDF generation: an admin uploads a prepared PDF.
+
+- **Workflow:** one PDF per package (`Package.itineraryPdfId` points at a `DOCUMENT` media record), uploaded, replaced,
+  previewed and removed in the admin's PDF & publish tab. Checked on upload: not empty, up to 4 MB, declared
+  `application/pdf`, and starting with `%PDF-`. Required to publish (enforced by the API). A live package's PDF can
+  be replaced but not removed. Uploads go through the admin's server (Vercel limit 4.5 MB; a 4 MB upload measured
+  4,194,645 bytes).
+- **Storage:** the Stage E private storage (`raw/authenticated` under `CLOUDINARY_FOLDER`, read back with a signed link and
+  streamed by the API). Replacing stores the new file first, switches the package in a transaction, then deletes the
+  old file and its record; a failed deletion is logged (`pdf.file_delete_failed`) and the archived record kept.
+- **Website:** one "Download itinerary (PDF)" button, or "not available yet" for packages without one.
+- **Removed:** the Chromium renderer, template, version fingerprints, automatic rebuilds, the generate/status/version
+  routes, `seed --pdfs`, `playwright-core`, the PDF fonts and logo, `PDF_BROWSER_*`, and Chromium in the `Dockerfile`
+  (image 1.39 GB -> 385 MB; peak memory 477 MB -> 126 MB; Render Starter is enough).
+- **Kept, untouched:** the legacy `itinerary_pdfs` collection and its 34 private files in `getset/staging/documents`,
+  their media records, all backups. To be retired after production verification, with approval.
+- **Verified:** backend 12 test files (13 new PDF tests); admin 16 unit tests, lint, typecheck, build; website lint,
+  typecheck, build; an end-to-end browser run of all three apps on a throwaway local stack (21 of 21 checks); the
+  Docker image against a throwaway MongoDB (4 MB upload, preview, removal). Nothing touched Atlas or Cloudinary.

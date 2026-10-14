@@ -1,11 +1,14 @@
 import { Hono, type Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { env } from "../../config/env.ts";
+import { Package, type PackageDoc } from "../../db/models.ts";
 import { signToken } from "../../lib/crypto.ts";
-import { idParam, ok, parse, readBody, readQuery, type AppEnv } from "../../lib/http.ts";
+import { AppError, badRequest, notFound } from "../../lib/errors.ts";
+import { idParam, ok, readBody, readQuery, type AppEnv } from "../../lib/http.ts";
 import { requireRole } from "../auth/middleware.ts";
 import { audit } from "../audit.ts";
-import { findPdfVersion, ensureCurrentPdf, pdfHeaders, pdfStatus, readPdf, versionDto } from "../pdf/service.ts";
+import { PDF_MAX_BYTES, pdfHeaders, readItineraryPdf, removeItineraryPdf, uploadItineraryPdf } from "../pdf/itinerary-pdf.ts";
 import {
   activitiesInput,
   adminPackageQuery,
@@ -115,15 +118,32 @@ export const packageAdminRoutes = new Hono<AppEnv>()
     });
   })
 
-  .get("/:id/pdf", async (c) => ok(c, await pdfStatus(idParam(c))))
-  /** Generate now (no-op when the current content already has a PDF). */
-  .post("/:id/pdf", async (c) => ok(c, versionDto(await ensureCurrentPdf(idParam(c), c.get("admin")))))
-  .get("/:id/pdf/:version/:branding", async (c) => {
-    const id = idParam(c);
-    const version = parse(z.coerce.number().int().min(1), c.req.param("version"));
-    const branding = parse(z.enum(["with-logo", "without-logo"]), c.req.param("branding"));
-    const found = await findPdfVersion(id, version);
-    const file = branding === "with-logo" ? found.withLogo : found.withoutLogo;
-    return c.body(new Uint8Array(await readPdf(file)), 200, { ...pdfHeaders(file, "inline"), "Cache-Control": "private, no-store" });
-  });
+  /** The uploaded itinerary PDF, for checking in the admin. Never cached. */
+  .get("/:id/itinerary-pdf", async (c) => {
+    const pkg = await Package.findOne({ _id: idParam(c), deletedAt: null }, { itineraryPdfId: 1 }).lean<Pick<PackageDoc, "itineraryPdfId">>();
+    if (!pkg) throw notFound("Package");
+    const file = await readItineraryPdf(pkg.itineraryPdfId);
+    if (!file) throw notFound("Itinerary PDF");
+    return c.body(new Uint8Array(file.data), 200, { ...pdfHeaders(file.row.fileName, file.data.length, "inline"), "Cache-Control": "private, no-store" });
+  })
+  /** Upload or replace the itinerary PDF (multipart, field "file", up to 4 MB). */
+  .put(
+    "/:id/itinerary-pdf",
+    requireRole("EDITOR"),
+    bodyLimit({
+      maxSize: PDF_MAX_BYTES + 64 * 1024,
+      onError: () => {
+        throw new AppError(413, "FILE_TOO_LARGE", "Itinerary PDFs can be up to 4 MB.");
+      },
+    }),
+    async (c) => {
+      const form = await c.req.parseBody().catch(() => {
+        throw badRequest("INVALID_UPLOAD", 'Send the PDF as multipart/form-data in a field named "file"');
+      });
+      if (!(form.file instanceof File)) throw badRequest("INVALID_UPLOAD", "Choose a PDF file to upload.");
+      return ok(c, await uploadItineraryPdf(idParam(c), form.file, c.get("admin")));
+    },
+  )
+  /** Remove the itinerary PDF of a package that is not published. */
+  .delete("/:id/itinerary-pdf", requireRole("ADMIN"), async (c) => ok(c, await removeItineraryPdf(idParam(c), c.get("admin"))));
 

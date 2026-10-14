@@ -5,6 +5,7 @@ import {
   Category,
   Destination,
   Hotel,
+  Media,
   Package,
   PRICE_TYPES,
   withId,
@@ -13,6 +14,7 @@ import {
   type CategoryDoc,
   type DestinationDoc,
   type HotelDoc,
+  type MediaDoc,
   type PackageDoc,
   type PackagePrice,
   type PriceType,
@@ -42,10 +44,12 @@ export function priceTable(rows: Pick<PackagePrice, "priceType" | "currencyCode"
   return table;
 }
 
-const pdfLinks = (slug: string) => ({
-  withLogoUrl: `${env.API_URL}/api/public/packages/${slug}/pdf?branding=with-logo`,
-  withoutLogoUrl: `${env.API_URL}/api/public/packages/${slug}/pdf?branding=without-logo`,
-});
+/** The uploaded itinerary PDF of a published package (downloaded through the API), or null when there is none. */
+async function pdfLink(graph: Pick<PackageGraph, "slug" | "status" | "itineraryPdfId">) {
+  if (graph.status !== "PUBLISHED" || !graph.itineraryPdfId) return null;
+  const file = await Media.findOne({ _id: graph.itineraryPdfId, deletedAt: null }, { sizeBytes: 1, createdAt: 1 }).lean<Pick<MediaDoc, "sizeBytes" | "createdAt">>();
+  return file ? { url: `${env.API_URL}/api/public/packages/${graph.slug}/pdf`, sizeBytes: file.sizeBytes, updatedAt: file.createdAt } : null;
+}
 
 /**
  * Active branches and destinations, and every category. Packages are public only when published, not deleted,
@@ -270,7 +274,7 @@ const paragraphs = (text: string) =>
     .map((paragraph) => paragraph.trim())
     .filter(Boolean);
 
-/** The customer-facing package: everything the package page, preview and PDF show. */
+/** The customer-facing package: everything the package page and its preview show. */
 export async function packageDetail(graph: PackageGraph) {
   const imageIds = [
     graph.heroImageId,
@@ -342,7 +346,7 @@ export async function packageDetail(graph: PackageGraph) {
     destination: destinationDto(graph.destination, image),
     branch: branchDto(graph.branch, image),
     reviews: reviews.get(graph.id) ?? [],
-    pdf: pdfLinks(graph.slug),
+    pdf: await pdfLink(graph),
     seo: seoDto(graph, image),
     publishedAt: graph.publishedAt,
     updatedAt: graph.updatedAt,

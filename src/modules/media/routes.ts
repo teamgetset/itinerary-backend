@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
-import { Media, defined, type MediaDoc } from "../../db/models.ts";
-import { AppError, badRequest, notFound } from "../../lib/errors.ts";
+import { Media, Package, defined, type MediaDoc } from "../../db/models.ts";
+import { AppError, badRequest, inUse, notFound } from "../../lib/errors.ts";
 import { idParam, ok, pageMeta, pageQuery, readBody, readQuery, type AppEnv } from "../../lib/http.ts";
 import { log } from "../../lib/logger.ts";
 import { contains } from "../../lib/text.ts";
@@ -125,6 +125,8 @@ export const mediaAdminRoutes = new Hono<AppEnv>()
   /** Archive: the file stays reachable where it is already used, but leaves the library. */
   .delete("/:id", requireRole("ADMIN"), async (c) => {
     const id = idParam(c);
+    // Except a package's itinerary PDF, which is only served while its record is live: replace or remove it in the package.
+    if (await Package.exists({ itineraryPdfId: id })) throw inUse();
     const archived = await Media.updateOne({ _id: id, deletedAt: null }, { $set: { deletedAt: new Date() } });
     if (!archived.matchedCount) throw notFound("File");
     await audit(c.get("admin"), "MEDIA_ARCHIVED", "media", id);

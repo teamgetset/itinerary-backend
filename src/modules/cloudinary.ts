@@ -118,6 +118,12 @@ export async function downloadDocument(publicId: string): Promise<Buffer> {
   return Buffer.from(await response.arrayBuffer());
 }
 
+/** Deletes a private document. A document that is already gone counts as deleted; any other answer throws. */
+export async function destroyDocument(publicId: string) {
+  const response: { result?: string } = await client().uploader.destroy(publicId, { resource_type: "raw", type: "authenticated", invalidate: true });
+  if (response.result !== "ok" && response.result !== "not found") throw new Error(`Cloudinary could not delete the document (${response.result ?? "no result"})`);
+}
+
 /** Public ids of the private documents under a prefix (Admin API; for verification). */
 export async function listDocumentIds(prefix: string) {
   const ids: string[] = [];

@@ -1,7 +1,7 @@
 import { env } from "../../config/env.ts";
 import type { CloudinaryAsset } from "../../db/models.ts";
 import { log } from "../../lib/logger.ts";
-import { destroyImage, documentPublicId, downloadDocument, uploadDocument, uploadImage } from "../cloudinary.ts";
+import { destroyDocument, destroyImage, documentPublicId, downloadDocument, uploadDocument, uploadImage } from "../cloudinary.ts";
 import { newKey, storage } from "../storage.ts";
 
 /*
@@ -42,24 +42,15 @@ export async function discardImage(stored: StoredImage) {
   }
 }
 
-/** The bytes of a stored image (for PDFs): from Cloudinary when it lives there, else from local storage. */
-export async function readImage(row: { storageKey: string; cloudinary: CloudinaryAsset | null }): Promise<Buffer | null> {
-  if (row.cloudinary) {
-    const response = await fetch(row.cloudinary.secureUrl, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
-    return response?.ok ? Buffer.from(await response.arrayBuffer()) : null;
-  }
-  return storage.get(row.storageKey);
-}
-
 // ---------------------------------------------------------------------------------------------
 // Documents (itinerary PDFs). Same provider switch; on Cloudinary they are private and read back with a signed link.
 
 export const documentStore = {
   provider: env.STORAGE_PROVIDER,
-  cloudinary: { upload: uploadDocument, download: downloadDocument },
+  cloudinary: { upload: uploadDocument, download: downloadDocument, destroy: destroyDocument },
 };
 
-/** Stores a generated PDF under `key` ("documents/itineraries/<package>/<file>.pdf"). */
+/** Stores an itinerary PDF under `key` ("documents/itineraries/<package>/<media id>.pdf"); verified before returning. */
 export async function storeDocument(key: string, data: Buffer): Promise<StoredImage> {
   if (documentStore.provider === "cloudinary") {
     const { asset } = await documentStore.cloudinary.upload(documentPublicId(key), data);
@@ -78,3 +69,8 @@ export async function readDocument(row: { storageKey: string; cloudinary: Cloudi
   return storage.get(row.storageKey);
 }
 
+/** Deletes a stored PDF, wherever it lives. Throws when the provider fails, so callers can report it. */
+export async function deleteDocument(row: { storageKey: string; cloudinary: CloudinaryAsset | null }) {
+  if (row.cloudinary) await documentStore.cloudinary.destroy(row.cloudinary.publicId);
+  else await storage.delete(row.storageKey);
+}

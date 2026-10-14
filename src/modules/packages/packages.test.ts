@@ -104,7 +104,7 @@ test("publishing is blocked until the package is complete, with a checklist", as
   const check = await api("GET", `/api/admin/packages/${bare.body.data.id}/publish-check`, { token });
   assert.equal(check.body.data.ready, false);
   const failing = check.body.data.checklist.filter((i: { ok: boolean }) => !i.ok).map((i: { key: string }) => i.key);
-  assert.deepEqual(failing, ["heroImage", "description", "pricing", "itinerary"]);
+  assert.deepEqual(failing, ["heroImage", "description", "pricing", "itinerary", "itineraryPdf"]);
 
   const publish = await api("POST", `/api/admin/packages/${bare.body.data.id}/publish`, { token });
   assert.equal(publish.status, 422);
@@ -115,7 +115,7 @@ test("publishing is blocked until the package is complete, with a checklist", as
   assert.equal(itinerary.message, "At least one itinerary day is required before publishing.");
 });
 
-test("publish, unpublish, archive: public visibility follows status; PDF built on publish; actions audited", async () => {
+test("publish, unpublish, archive: public visibility follows status; the uploaded PDF is offered; actions audited", async () => {
   const pkg = await readyPackage(token, ids, { title: "Lifecycle Trip" });
   const published = await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token });
   assert.equal(published.status, 200, JSON.stringify(published.body));
@@ -127,11 +127,8 @@ test("publish, unpublish, archive: public visibility follows status; PDF built o
   assert.deepEqual(detail.body.data.overview, ["First paragraph.", "Second paragraph."]);
   assert.equal(detail.body.data.itinerary[0].activities[0].time, "10:30");
   assert.equal(detail.body.data.branch.slug, "dubai");
-  assert.match(detail.body.data.pdf.withoutLogoUrl, /branding=without-logo$/);
-
-  const status = await api("GET", `/api/admin/packages/${pkg.id}/pdf`, { token });
-  assert.equal(status.body.data.upToDate, true);
-  assert.equal(status.body.data.current.version, 1);
+  assert.match(detail.body.data.pdf.url, /\/api\/public\/packages\/lifecycle-trip\/pdf$/);
+  assert.ok(detail.body.data.pdf.sizeBytes > 0);
 
   await api("POST", `/api/admin/packages/${pkg.id}/unpublish`, { token });
   assert.equal((await api("GET", `/api/public/packages/${pkg.slug}`)).status, 404);
@@ -139,7 +136,7 @@ test("publish, unpublish, archive: public visibility follows status; PDF built o
   assert.equal((await api("GET", `/api/admin/packages/${pkg.id}`, { token })).body.data.status, "ARCHIVED");
 
   const actions = (await AuditLog.find({ entityId: pkg.id }).lean()).map((row) => row.action);
-  for (const action of ["PACKAGE_CREATED", "PACKAGE_UPDATED", "PDF_GENERATED", "PACKAGE_PUBLISHED", "PACKAGE_UNPUBLISHED", "PACKAGE_ARCHIVED"]) {
+  for (const action of ["PACKAGE_CREATED", "PACKAGE_UPDATED", "ITINERARY_PDF_UPLOADED", "PACKAGE_PUBLISHED", "PACKAGE_UNPUBLISHED", "PACKAGE_ARCHIVED"]) {
     assert.ok(actions.includes(action), `missing ${action}`);
   }
 });

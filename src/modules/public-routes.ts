@@ -12,7 +12,7 @@ import { activeCurrencies, currencyDto } from "./currencies.ts";
 import { getPublicDestination, listPublicDestinations } from "./destinations.ts";
 import { createEnquiry, enquiryInput } from "./enquiries.ts";
 import { listPublicHeroSlides } from "./hero-slides.ts";
-import { ensureCurrentPdf, pdfHeaders, readPdf } from "./pdf/service.ts";
+import { pdfHeaders, pdfNotAvailable, readItineraryPdf } from "./pdf/itinerary-pdf.ts";
 import { getPublicPackage, listPublicPackages, loadPackageGraph, packageDetail, recommendations } from "./packages/read.ts";
 import { quote, quoteInput } from "./pricing.ts";
 import { search } from "./search.ts";
@@ -98,17 +98,18 @@ export const publicRoutes = new Hono<AppEnv>()
     if (!items) throw notFound("Package");
     return ok(c, items);
   })
-  /** The itinerary PDF matching the package as published now (built on first request after a change). */
+  /**
+   * The package's uploaded itinerary PDF, streamed from private storage (no storage URL ever reaches the browser).
+   * The download name is built from the slug. An old ?branding= query is ignored.
+   */
   .get("/packages/:slug/pdf", async (c) => {
-    const branding = parse(z.enum(["with-logo", "without-logo"]).default("with-logo"), c.req.query("branding"));
     const graph = await getPublicPackage(slugParam(c.req.param("slug")));
     if (!graph) throw notFound("Package");
-    const version = await ensureCurrentPdf(graph.id, null);
-    const file = branding === "with-logo" ? version.withLogo : version.withoutLogo;
-    return c.body(new Uint8Array(await readPdf(file)), 200, {
-      ...pdfHeaders(file, "attachment"),
+    const file = await readItineraryPdf(graph.itineraryPdfId);
+    if (!file) throw pdfNotAvailable();
+    return c.body(new Uint8Array(file.data), 200, {
+      ...pdfHeaders(`getset-${graph.slug}-itinerary.pdf`, file.data.length, "attachment"),
       "Cache-Control": "public, max-age=300",
-      "X-Pdf-Version": String(version.version),
     });
   })
 

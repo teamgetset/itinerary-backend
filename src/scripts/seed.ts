@@ -2,7 +2,7 @@
  * Loads the demo catalogue (seed/demo-catalog.json + seed/images) into an empty database.
  *   npm run db:seed                                              refuses if packages already exist
  *   npm run db:seed -- --reset --confirm-database <name>         wipes content and uploaded files first (never in production)
- *   npm run db:seed -- --pdfs                                    also generates every itinerary PDF
+ * Demo packages have no itinerary PDF (upload one in the admin); the website shows it as not available yet.
  * Optional: SEED_ADMIN_EMAIL + SEED_ADMIN_PASSWORD create a super admin for local use.
  * The content is DEMO data; see the note at the top of the JSON file.
  */
@@ -41,7 +41,6 @@ import { safeMessage } from "../lib/logger.ts";
 import { slugify } from "../lib/text.ts";
 import { CONTENT_DEFAULTS } from "../modules/content.ts";
 import { refreshSearchText } from "../modules/packages/search-text.ts";
-import { ensureCurrentPdf } from "../modules/pdf/service.ts";
 import { storeImage } from "../modules/media/store.ts";
 import { sniffImage } from "../modules/storage.ts";
 
@@ -95,7 +94,7 @@ interface SeedData {
 const SEED_DIR = new URL("../../seed/", import.meta.url);
 const data: SeedData = JSON.parse(readFileSync(new URL("demo-catalog.json", SEED_DIR), "utf8"));
 const { values: args } = parseArgs({
-  options: { reset: { type: "boolean", default: false }, "confirm-database": { type: "string" }, pdfs: { type: "boolean", default: false } },
+  options: { reset: { type: "boolean", default: false }, "confirm-database": { type: "string" } },
 });
 
 /** Everything the demo seed writes. Admin accounts, sessions and the audit log are left alone. */
@@ -255,13 +254,6 @@ async function seed() {
       console.log(`Created super admin ${email} (from SEED_ADMIN_EMAIL).`);
     }
   }
-
-  if (args.pdfs) {
-    for (const pkg of await Package.find({}, { slug: 1 }).lean<{ _id: string; slug: string }[]>()) {
-      const pdf = await ensureCurrentPdf(pkg._id, null);
-      console.log(`PDF v${pdf.version} ${pkg.slug}`);
-    }
-  }
 }
 
 try {
@@ -272,6 +264,4 @@ try {
   process.exitCode = 1;
 } finally {
   await disconnectDb();
-  // The PDF browser closes itself after a minute; do not wait for it.
-  setTimeout(() => process.exit(process.exitCode ?? 0), 100).unref();
 }

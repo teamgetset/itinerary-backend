@@ -275,6 +275,8 @@ export interface PackageDoc extends Seo, Timestamps {
   arrivalAirportCode: string | null;
   arrivalCity: string | null;
   heroImageId: string | null;
+  /** The uploaded itinerary PDF (a DOCUMENT media record); required to publish. */
+  itineraryPdfId: string | null;
   keywords: string[];
   importantInfo: string[];
   status: PackageStatus;
@@ -665,6 +667,7 @@ const packageSchema = new Schema<PackageDoc>(
     arrivalAirportCode: { type: String, default: null, match: /^[A-Z]{3}$/ },
     arrivalCity: text(false),
     heroImageId: ref,
+    itineraryPdfId: ref,
     keywords: { type: [String], default: [] },
     importantInfo: { type: [String], default: [] },
     status: { type: String, enum: PACKAGE_STATUSES, required: true, default: "DRAFT" },
@@ -693,7 +696,9 @@ packageSchema.index({ destinationId: 1 });
 packageSchema.index({ status: 1, displayOrder: 1 });
 
 // ---------------------------------------------------------------------------------------------
-// Itinerary PDFs: one document per generated version, pointing at both prints.
+// LEGACY: itinerary PDFs the API used to generate (one document per version, pointing at both prints). Nothing writes
+// here any more; the collection and its files are kept until they are retired after production verification.
+// Itinerary PDFs are now uploaded by the admin: Package.itineraryPdfId.
 
 const itineraryPdfSchema = new Schema<ItineraryPdfDoc>(
   {
@@ -859,6 +864,7 @@ export const REFERENCES: { from: Model<any>; path: string; to: Model<any> }[] = 
   { from: Package, path: "destinationId", to: Destination },
   { from: Package, path: "categoryId", to: Category },
   { from: Package, path: "heroImageId", to: Media },
+  { from: Package, path: "itineraryPdfId", to: Media },
   { from: Package, path: "ogImageId", to: Media },
   { from: Package, path: "createdById", to: AdminUser },
   { from: Package, path: "updatedById", to: AdminUser },

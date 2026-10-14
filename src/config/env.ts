@@ -62,10 +62,6 @@ const schema = z
     /** Folder for this database's assets, e.g. getset/staging. Part of every asset's permanent URL. */
     CLOUDINARY_FOLDER: optional(z.string().regex(/^[A-Za-z0-9_-]+(\/[A-Za-z0-9_-]+)*$/, "folder names like getset/staging")),
 
-    /** Chrome or Chromium used to print PDFs. Either a channel ("chrome") or an executable path. */
-    PDF_BROWSER_CHANNEL: z.string().default("chrome"),
-    PDF_BROWSER_PATH: optional(z.string()),
-
     DEFAULT_CURRENCY: z.string().length(3).toUpperCase().default("INR"),
     SUPPORTED_CURRENCIES: list.default(["INR", "AED"]),
     /** Fallback WhatsApp number (international format, digits only) when a branch has none. */

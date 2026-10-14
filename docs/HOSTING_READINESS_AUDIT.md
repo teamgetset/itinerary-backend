@@ -4,7 +4,7 @@ Audit date: 2026-10-13. Scope: the three repositories (`getset-itinerary-backend
 `getset-itinerary-admin`) for this hosting setup:
 
 - **Vercel:** the website and the admin (two projects).
-- **Render:** the API, as a Docker service (Chromium prints the PDFs).
+- **Render:** the API, as a Docker service.
 - **MongoDB Atlas:** the database.
 - **Cloudinary:** images (public) and itinerary PDFs (private).
 
@@ -12,6 +12,13 @@ Nothing was committed, pushed, deployed or deleted, and Atlas and Cloudinary wer
 against a throwaway local copy of the database. No secret appears in this document. This audit builds on, and does not
 repeat, [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md) (procedures: least-privilege user, backups, rollback, smoke
 tests) and [MONGODB_CLOUDINARY_MIGRATION_PLAN.md](MONGODB_CLOUDINARY_MIGRATION_PLAN.md) (what was migrated and verified).
+
+> **Update 2026-10-14: itinerary PDFs are uploaded, not generated.** An admin uploads one prepared PDF per package
+> (PDF only, up to 4 MB, required to publish). The API stores it privately on Cloudinary under `CLOUDINARY_FOLDER`
+> (`getset/production` in production) and streams it to customers. Chromium, Playwright and the `PDF_BROWSER_*` settings
+> are gone: the image is 385 MB instead of 1.39 GB and peaked at 126 MB in a test with a 4 MB upload, so **Render
+> Starter (512 MB, $7) is now the recommended instance**. The rows below are updated; the generated PDFs and their
+> records in the staging database stay untouched until they are retired after production verification.
 
 ## Verdict: READY AFTER FIXES
 
@@ -52,8 +59,8 @@ Labels:
 
 | Item | Status | Evidence / note |
 | --- | --- | --- |
-| `Dockerfile` builds: Node 22, Debian Chromium 155, `fonts-dejavu-core`, CA certificates, runs as `node`, no `.env`/data/sources in the image | Verified | Built and run in Stage E and again on 2026-10-13 (Stage G) |
-| PDFs print in the image (photos, logo, ₹ and the dirham sign correct) | Verified | Stage E visual check; Stage G: 24 PDFs in a row |
+| `Dockerfile` builds: Node 22, runs as `node`, no `.env`/data/sources in the image; no Chromium since 2026-10-14 (385 MB) | Verified | Built and run on 2026-10-14 against a throwaway MongoDB replica set |
+| Itinerary PDF upload and download in the image | Verified | 2026-10-14: a 4 MB upload, a byte-identical admin preview, and a removal that deleted the file (local storage in the container) |
 | Start command | Verified | The image's `CMD ["node","dist/server.js"]`; Render needs no start command for Docker services |
 | Port | Verified | The API listens on `PORT`, on all interfaces (reached through Docker port mapping). Render sets `PORT=10000` and deploys fail if no bound port is found ([docs/web-services](https://render.com/docs/web-services)). Do not set `PORT` yourself. |
 | Health check `/health` | Verified | 200 in production mode; it pings the database. Render needs a 2xx within 5 s and cancels a deploy whose instance is not healthy within 15 minutes ([docs/health-checks](https://render.com/docs/health-checks)) |
@@ -65,10 +72,10 @@ Labels:
 | Rate limits | Verified (locally) / Blocked (F2 on Render) | Sign-in: 5 per email and 20 per address per 15 min, then 429. Enquiries: 5 per address per 10 min, plus a hidden bot trap. Counters live in the process: **run one instance**. |
 | Atlas from Render | Pending | Verified from the same image on this Mac against Atlas. On Render it needs Atlas Network Access (section 4.2). |
 | Cloudinary from Render | Pending | Verified from the same image on this Mac. Outbound HTTPS only, no allow-list needed. |
-| Memory and instance type | Verified (measured) | Peak 477 MB of 512 MB while printing (Stage G); with one extra process Chromium was killed. Render plans ([docs/compute-plans](https://render.com/docs/compute-plans), [pricing](https://render.com/pricing)): Free 0.1 CPU / 512 MB (sleeps after 15 min idle, about 1 min to wake); Starter 0.5 CPU / 512 MB $7; **Standard 1 CPU / 2 GB $25**; there is no 1 GB plan. **Recommended: Standard.** Starter works at the edge, but any extra load during a print fails publishing and downloads. Free is unsuitable: it sleeps, which breaks website builds and revalidation, and 0.1 CPU is very slow for Chromium. |
+| Memory and instance type | Verified (measured) | Without Chromium: about 46 MB idle and a 126 MB peak during a 4 MB PDF upload (2026-10-14; it was 477 MB while printing PDFs). Render plans ([docs/compute-plans](https://render.com/docs/compute-plans), [pricing](https://render.com/pricing)): Free 0.1 CPU / 512 MB (sleeps after 15 min idle, about 1 min to wake); **Starter 0.5 CPU / 512 MB $7 (recommended)**; Standard 1 CPU / 2 GB $25. Free is unsuitable: it sleeps, which breaks website builds and revalidation. |
 | Region | Verified / Recommended | The Atlas cluster is AWS `ap-south-1` (Mumbai) (read from the cluster's tags, 2026-10-13). Render has no India region; the closest is **Singapore** (regions: Oregon, Ohio, Virginia, Frankfurt, Singapore; the region cannot be changed later; [docs/regions](https://render.com/docs/regions)). |
 | Storage provider | Verified / Recommended | Must be `STORAGE_PROVIDER=cloudinary`. The default is `local`, which on Render would write new uploads and PDFs to a disk that disappears on every deploy. Existing records still read from Cloudinary either way. Recommended: make the API refuse `local` in production (a 3-line check). |
-| Zombie processes | Recommended | Node runs as process 1 without an init process; Chromium helper processes that outlive their parent are then never cleaned up. Not observed here; adding `tini` to the image is the standard precaution. |
+| Zombie processes | No longer applies | Chromium was the only source of helper processes; the image no longer starts it. |
 | Dependency vulnerabilities | Verified | `npm audit` (production dependencies): 0 in all three repositories (2026-10-13) |
 
 ## 3. Vercel (website and admin)
@@ -130,7 +137,7 @@ Whether those snapshots cost extra is not stated. Choose AWS **Singapore** for i
 | --- | --- | --- |
 | Folder separation | Verified / Pending | The folder comes only from `CLOUDINARY_FOLDER`; nothing is hard-coded (Verified, grep). Set `getset/production` for production uploads. Records copied from `getset` keep their `getset/staging/...` addresses, so **never empty `getset/staging`** while production uses them. |
 | One account for staging and production | Verified (docs) / Recommended | The Free plan supports only one product environment ([docs](https://cloudinary.com/documentation/solution_overview)), so separation is by folder. Create a separate **API key** for production (Settings → API Keys), so each can be rotated on its own. |
-| PDFs private | Verified | All 34 are `raw/authenticated`; unsigned URLs are refused; the API alone fetches them with a short-lived signed link and streams them; no Cloudinary PDF URL appears in API responses (Stages E–G). Keep "Allow delivery of PDF and ZIP files" **off**: it is off by default on Free accounts ([docs](https://cloudinary.com/documentation/ts_how_to_upload_manage_and_deliver_pdf_files)), and the API's private download does not need it. |
+| PDFs private | Verified (code, tests) / Pending (live) | Uploaded PDFs are stored `raw/authenticated` with the storage code verified against real Cloudinary in Stage E (unsigned URLs refused); the API alone fetches them with a short-lived signed link and streams them; no Cloudinary URL appears in API responses (tests). Deleting a replaced or removed file (`raw`/`authenticated` destroy) is new and was only tested against a fake: confirm it once after deploying (section 7). Keep "Allow delivery of PDF and ZIP files" **off**: it is off by default on Free accounts ([docs](https://cloudinary.com/documentation/ts_how_to_upload_manage_and_deliver_pdf_files)), and the API's private download does not need it. |
 | Backups | Recommended | "Backup is available on all plans", "Automatic backup is off by default", and without it deleted assets cannot be recovered ([docs](https://cloudinary.com/documentation/backups_and_version_management)). Turn it on: it counts toward storage, which is tiny here. |
 
 ### 4.4 Will anything be lost during deployment?
@@ -144,8 +151,8 @@ Whether those snapshots cost extra is not stated. Choose AWS **Singapore** for i
 
 The only expected writes:
 
-- Each package rebuilds its PDF once when the production site address is first used. The address is printed in the PDF,
-  so this adds 12 versions and 24 private files.
+- None for PDFs: they are no longer generated. Existing packages start without an uploaded PDF and show "not available
+  yet" until one is uploaded.
 - Normal admin activity.
 
 ## 5. Environment variables by application
@@ -172,8 +179,8 @@ Shapes of the local values were checked without printing them; production values
 | `CLOUDINARY_FOLDER` | No | Your choice, for example `getset/production` |
 | `SESSION_TTL_HOURS`, `DEFAULT_CURRENCY`, `SUPPORTED_CURRENCIES`, `LOG_LEVEL` | No | Optional: defaults are 12, `INR`, `INR,AED` and `info` |
 | `WHATSAPP_NUMBER` | No (public) | Optional: the business number (international format, digits only) |
-| Set for you | – | `PORT` (Render), `NODE_ENV=production` and `PDF_BROWSER_PATH` (the image) |
-| Do not set | – | `DATABASE_URL`, `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, `STORAGE_LOCAL_DIR`, `PDF_BROWSER_CHANNEL` |
+| Set for you | – | `PORT` (Render) and `NODE_ENV=production` (the image) |
+| Do not set | – | `DATABASE_URL`, `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, `STORAGE_LOCAL_DIR`; `PDF_BROWSER_*` no longer exist (ignored if present) |
 
 ### 5.2 Website (Vercel)
 
@@ -220,7 +227,7 @@ Shapes of the local values were checked without printing them; production values
    The `getset/production` folder is created by the first upload.
 6. **Render.**
    1. Create a Hobby workspace, then New → Web Service from `itinerary-backend` → Docker.
-   2. Region **Singapore**, instance **Standard**, health check path `/health`, one instance.
+   2. Region **Singapore**, instance **Starter**, health check path `/health`, one instance.
    3. Add the variables in 5.1. Use the URLs from step 2 for `API_URL`, `FRONTEND_URL` and `ADMIN_URL`.
    4. Copy the service's outbound ranges into Atlas Network Access.
    5. Deploy, or redeploy if the first attempt could not reach Atlas, until `/health` answers 200.
@@ -244,14 +251,14 @@ Shapes of the local values were checked without printing them; production values
        - admin: `API_URL`, `SITE_URL`.
     3. Redeploy all three; the website must rebuild.
 
-    Changing `FRONTEND_URL` makes every PDF rebuild once, so settle the final domain early.
+    Settle the final domain early: it appears in links, the sitemap and canonical URLs.
 11. **Smoke and security tests** (checklist section 7, plus section 7 below).
 12. **Backups.** Take a `mongodump` of production, confirm Flex's daily snapshots and Cloudinary's backup. Then retire the
     `atlasAdmin` credential from application use and change its password (checklist section 5).
 
 ## 7. Tests on the deployed services (Pending)
 
-- Everything in checklist section 7: health, packages, Cloudinary photo URLs, PDF download, 401 without a session,
+- Everything in checklist section 7: health, packages, Cloudinary photo URLs, itinerary PDF upload and download, 401 without a session,
   CORS for the website's origin, website pages and currency switch, admin sign-in and sign-out, revalidation.
 - **Client address (F2).** The API now counts `CF-Connecting-IP` (set by Render's Cloudflare edge) when
   `TRUST_PROXY=cloudflare`, and never `X-Forwarded-For`. Locally the tests prove the header logic; only the deployed
@@ -274,7 +281,10 @@ Shapes of the local values were checked without printing them; production values
     `ADMIN_PROXY_SECRET` differs between, or is missing in, the admin project and the Render service.
   - A forged request straight to the API (`-H 'x-getset-client-ip: 203.0.113.9' -H 'x-getset-proxy-secret: wrong'`)
     must log `http.forwarded_ip_rejected` and count your own address.
-- **Memory:** watch the instance's memory graph while publishing a package; the expected peak is about 480 MB.
+- **Itinerary PDFs (live Cloudinary):** upload a PDF to one package, replace it, then (on a draft) remove it. In the
+  Cloudinary console under `getset/production/documents/itineraries/`, only the current file remains, and the API logs
+  show no `pdf.file_delete_failed`. The website's download button downloads `getset-<slug>-itinerary.pdf`.
+- **Memory:** watch the instance's memory graph during the first PDF upload; the expected peak is about 130 MB.
 
 ## 8. Hosting costs
 
@@ -298,16 +308,16 @@ media today: 53 images, 24 MB, and 34 PDFs, 25 MB; Verified):
 
 | Setup | Render | Vercel | Atlas | Cloudinary | Total |
 | --- | --- | --- | --- | --- | --- |
-| **Recommended** | Standard $25 | Pro $20 | Flex $8–30 | Free $0 | **about $53–75** |
-| Lowest workable (accepting memory and backup risk) | Starter $7 | Pro $20 | M0 $0 | Free $0 | about $27 |
-| Higher assurance | Standard $25 | Pro $20 | M10 about $57+ | Free $0 | about $102+ |
+| **Recommended** | Starter $7 | Pro $20 | Flex $8–30 | Free $0 | **about $35–57** |
+| Lowest workable (accepting no database backups) | Starter $7 | Pro $20 | M0 $0 | Free $0 | about $27 |
+| Higher assurance | Standard $25 (more CPU) | Pro $20 | M10 about $57+ | Free $0 | about $102+ |
 
 **Estimates and assumptions:**
 
 - Both Vercel projects fit in one Pro team, with one seat.
 - Image optimization stays within the $20 credit: about 53 photos × a few sizes × 2 formats is roughly a thousand
   transformations to start.
-- API bandwidth stays under 5 GB: a PDF is about 0.7 MB.
+- API bandwidth stays under 5 GB: an itinerary PDF is at most 4 MB.
 - Cloudinary stays within 25 credits.
 - Domain registration is not included.
 
@@ -331,6 +341,6 @@ Watch the dashboards in the first month to confirm.
 
 1. Reply with approval for fixes **F1** and **F2**, plus any Recommended items, for me to make and test (no commit).
 2. Decide: the production database (Flex in Singapore recommended), the Cloudinary production folder, the domains, and
-   the Render instance (Standard recommended).
+   the Render instance (Starter recommended).
 3. Review and commit/push the backend and website changes yourself (M1).
 4. Follow section 6 step by step, with checklist sections 5, 7 and 8 for the detailed procedures.

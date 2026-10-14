@@ -15,6 +15,7 @@ import {
   type BranchDoc,
   type CategoryDoc,
   type DestinationDoc,
+  type MediaDoc,
   type PackageDoc,
 } from "../../db/models.ts";
 import { AppError, conflict, invalidReference, notFound } from "../../lib/errors.ts";
@@ -24,7 +25,7 @@ import { contains } from "../../lib/text.ts";
 import { audit } from "../audit.ts";
 import { activeCurrencies } from "../currencies.ts";
 import { loadImages } from "../media/dto.ts";
-import { schedulePdfRefresh, ensureCurrentPdf } from "../pdf/service.ts";
+import { itineraryPdfInfo } from "../pdf/itinerary-pdf.ts";
 import { revalidate } from "../revalidate.ts";
 import { uniqueSlug, withImages } from "../shared.ts";
 import type {
@@ -67,12 +68,9 @@ async function assertReferences(input: { branchId?: string; destinationId?: stri
   if (input.ogImageId && !(await Media.exists({ _id: input.ogImageId }))) throw invalidReference("ogImageId");
 }
 
-/** After any content change: refresh the site, and rebuild the PDF if the package is live. */
+/** After any content change: refresh the site if the package is live. */
 async function afterChange(pkg: Pick<PackageRow, "id" | "status">) {
-  if (pkg.status === "PUBLISHED") {
-    revalidate("catalog");
-    schedulePdfRefresh(pkg.id);
-  }
+  if (pkg.status === "PUBLISHED") revalidate("catalog");
 }
 
 /**
@@ -81,7 +79,9 @@ async function afterChange(pkg: Pick<PackageRow, "id" | "status">) {
  */
 async function assertStillPublishable(id: string) {
   const graph = await loadPackageGraph({ _id: id });
-  const failed = graph ? (await publishChecklist(graph)).filter((item) => !item.ok) : [];
+  // The itinerary PDF is checked when publishing, and a live package's PDF cannot be removed (only replaced). Packages
+  // published before PDFs were uploaded may still lack one; that must not block their other edits.
+  const failed = graph ? (await publishChecklist(graph)).filter((item) => !item.ok && item.key !== "itineraryPdf") : [];
   if (failed.length) {
     throw new AppError(
       422,
@@ -127,20 +127,23 @@ export async function listAdminPackages(query: z.infer<typeof adminPackageQuery>
   ]);
 
   const ids = (field: "branchId" | "destinationId" | "categoryId") => [...new Set(docs.map((doc) => doc[field]).filter((id): id is string => !!id))];
-  const [branches, destinations, categories, image, active] = await Promise.all([
+  const pdfIds = docs.map((doc) => doc.itineraryPdfId).filter((id): id is string => !!id);
+  const [branches, destinations, categories, image, active, pdfs] = await Promise.all([
     Branch.find({ _id: { $in: ids("branchId") } }).lean<BranchDoc[]>(),
     Destination.find({ _id: { $in: ids("destinationId") } }).lean<DestinationDoc[]>(),
     Category.find({ _id: { $in: ids("categoryId") } }).lean<CategoryDoc[]>(),
     loadImages(docs.map((doc) => doc.heroImageId)),
     activeCurrencies(),
+    pdfIds.length ? Media.find({ _id: { $in: pdfIds }, deletedAt: null }, { fileName: 1, sizeBytes: 1, createdAt: 1 }).lean<MediaDoc[]>() : [],
   ]);
   const byId = <T extends { _id: string }>(rows: T[]) => new Map(rows.map((row) => [row._id, row]));
-  const [branchById, destinationById, categoryById] = [byId(branches), byId(destinations), byId(categories)];
+  const [branchById, destinationById, categoryById, pdfById] = [byId(branches), byId(destinations), byId(categories), byId(pdfs)];
   const codes = new Set(active.map((currency) => currency.code));
   const items = docs.map((pkg) => {
     const branch = branchById.get(pkg.branchId)!;
     const destination = destinationById.get(pkg.destinationId)!;
     const category = pkg.categoryId ? categoryById.get(pkg.categoryId) : undefined;
+    const pdf = pkg.itineraryPdfId ? pdfById.get(pkg.itineraryPdfId) : undefined;
     return {
       id: pkg._id,
       slug: pkg.slug,
@@ -156,6 +159,7 @@ export async function listAdminPackages(query: z.infer<typeof adminPackageQuery>
       prices: priceTable(pkg.prices, codes),
       seo: { title: pkg.seoTitle, description: pkg.seoDescription, noindex: pkg.noindex },
       heroImage: image(pkg.heroImageId),
+      itineraryPdf: pdf ? { fileName: pdf.fileName, sizeBytes: pdf.sizeBytes, uploadedAt: pdf.createdAt } : null,
       isFeatured: pkg.isFeatured,
       isRecommended: pkg.isRecommended,
       publishedAt: pkg.publishedAt,
@@ -228,6 +232,7 @@ export async function packageEditorDto(graph: PackageGraph) {
       isDefault: row.isDefault,
     })),
     activities: activityRows.map((row) => ({ activityId: row.activityId, activity: { name: row.activity.name } })),
+    itineraryPdf: await itineraryPdfInfo(graph.itineraryPdfId),
   };
 }
 
@@ -408,6 +413,7 @@ export async function publishChecklist(graph: PackageGraph): Promise<ChecklistIt
             ? `The itinerary has ${days} days but the package lasts ${graph.durationDays}.`
             : undefined,
     },
+    { key: "itineraryPdf", label: "Itinerary PDF", ok: !!graph.itineraryPdfId, message: graph.itineraryPdfId ? undefined : "Upload the itinerary PDF." },
   ];
 }
 
@@ -418,13 +424,11 @@ export async function publishPackage(id: string, admin: AdminContext) {
   if (failed.length) {
     throw new AppError(422, "PUBLISH_BLOCKED", "This package is not ready to publish", failed.map((item) => ({ path: item.key, message: item.message ?? `${item.label} is incomplete.` })));
   }
-  // The PDF is part of a published package: build it (if this content has none yet) before going live.
-  const pdf = await ensureCurrentPdf(id, admin);
   await transaction(async () => {
     await Package.updateOne({ _id: id }, { $set: { status: "PUBLISHED", publishedAt: graph.publishedAt ?? new Date(), updatedById: admin.id } });
-    await audit(admin, "PACKAGE_PUBLISHED", "package", id, { pdfVersion: pdf.version });
+    await audit(admin, "PACKAGE_PUBLISHED", "package", id, { itineraryPdfId: graph.itineraryPdfId });
   });
-  log.info("package.published", { packageId: id, adminUserId: admin.id, pdfVersion: pdf.version });
+  log.info("package.published", { packageId: id, adminUserId: admin.id });
   revalidate("catalog");
 }
 
@@ -458,6 +462,8 @@ export async function duplicatePackage(id: string, admin: AdminContext) {
   return transaction(async () => {
     const {
       id: _id, slug, title, status: _status, publishedAt: _p, createdAt: _c, updatedAt: _u, deletedAt: _d,
+      // Each package owns its PDF file (replacing or removing it deletes the file), so a copy starts without one.
+      itineraryPdfId: _pdf,
       branch: _b, destination: _de, category: _ca, activities: _a, hotels, itinerary, ...fields
     } = graph;
     const [copy] = await Package.create([

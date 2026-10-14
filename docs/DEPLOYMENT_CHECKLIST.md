@@ -5,6 +5,10 @@ production resource exists yet, and nothing has been committed. Companion docume
 [MONGODB_CLOUDINARY_MIGRATION_PLAN.md](MONGODB_CLOUDINARY_MIGRATION_PLAN.md) (what was migrated and how it was
 verified) and [PRODUCTION_ENVIRONMENT_AUDIT.md](PRODUCTION_ENVIRONMENT_AUDIT.md) (the original audit).
 
+> **Update 2026-10-14:** itinerary PDFs are now uploaded in the admin (PDF only, up to 4 MB, one per package, required
+> to publish) instead of generated; Chromium is gone from the image. Sections 2 (B8, W1, W3), 4.2, 7 and 9 below are
+> updated for this; see [HOSTING_READINESS_AUDIT.md](HOSTING_READINESS_AUDIT.md) for the current figures.
+>
 > **Update 2026-10-13:** [HOSTING_READINESS_AUDIT.md](HOSTING_READINESS_AUDIT.md) checks this checklist against the
 > chosen hosting: Vercel, and Render as a Docker service. It adds platform facts read on the providers' official pages,
 > two required fixes (F1, F2), costs and the final deployment order. Where the two documents differ, the audit wins.
@@ -31,7 +35,7 @@ origin, `<admin>` = the admin's origin, `<cloud>` = the Cloudinary cloud name. N
 | Images | 53 of 53 on Cloudinary (`getset/staging/images`), delivered byte-identical to their originals, no strays (2026-10-13). | [Verified] |
 | PDFs | 34 of 34 private (`raw/authenticated`) on Cloudinary, delivered byte-identical, unsigned access refused (2026-10-13). | [Verified] |
 | Cloudinary vs database | 87 assets under `getset/staging`, 87 records pointing at them: no asset without a record, no record without its asset. | [Verified] |
-| Render image | `Dockerfile` (Node 22, Chromium, fonts) built and run as production against Atlas and Cloudinary (Stage E). Memory under 512 MB: see section 2, item B8. | [Verified] |
+| Render image | `Dockerfile` (Node 22; Chromium removed 2026-10-14, 385 MB) built and run as production against a throwaway MongoDB: health, 4 MB PDF upload, preview, removal; 126 MB peak (section 9). | [Verified] |
 | Website | Production build against Atlas; desktop and phone; images, prices, currency switch, itinerary, PDFs (Stage F). | [Verified] |
 | Admin | Production build against Atlas; sign-in, every page, PDF previews, content, media and package workflows (Stage F). | [Verified] |
 | Backups | Every backup's checksums verified; both MongoDB backup formats restore exactly (section 8). | [Verified] |
@@ -76,20 +80,17 @@ origin, `<admin>` = the admin's origin, `<cloud>` = the Cloudinary cloud name. N
 - **B6. Vercel projects** for the website and the admin with the variables in section 6. The website build needs the
   live API on HTTPS (it renders pages from the API at build time) [Verified in code; Stage F build].
 - **B7. Final URLs wired back** into the API (`FRONTEND_URL`, `ADMIN_URL`) and `TRUST_PROXY=cloudflare`, then redeploy.
-- **B8. Memory:** printing PDFs peaks at about 477 MB, so a 512 MB instance works only at the edge (a test with
-  one extra process in the container ran out of memory). Use the next size above 512 MB (section 9).
+- **B8. Memory:** resolved by removing PDF generation (2026-10-14): the API peaked at 126 MB during a 4 MB PDF upload,
+  so Render **Starter** (512 MB) is enough (section 9).
 
 ### Warnings (not blocking)
 
-- **W1. PDFs rebuild once after go-live.** The PDF fingerprint includes `FRONTEND_URL` (it is printed in the PDF), so
-  when the production site address differs from `http://localhost:3000`, each package builds a new PDF version on
-  its first request or publish (12 new versions, 24 private files). Expected and harmless; set the final domain
-  before go-live to avoid doing it twice [Verified in code: `pdf/service.ts`].
+- **W1. Itinerary PDFs must be uploaded.** PDFs are no longer generated, so every package starts without one: publishing
+  needs one, and live packages without one show "not available yet" on the website until a PDF is uploaded.
 - **W2. Admin uploads over about 4.5 MB** may fail on Vercel even though the admin allows 12 MB and the API 10 MB:
   Vercel functions limit request bodies [Assumed]. Resize large photos before uploading, or upload them while
   running the admin locally.
-- **W3. One API instance.** Rate limits and the "one PDF build at a time" lock live in the process; run a single
-  Render instance [Verified in code].
+- **W3. One API instance.** Rate limits live in the process; run a single Render instance [Verified in code].
 - **W4. Free Render instances sleep** when idle and take time to wake [Assumed]; a sleeping API makes the first visit
   slow and can fail a website build. A paid instance avoids this.
 - **W5. Vercel preview deployments** have their own addresses; browser calls from them (paging, search, enquiries)
@@ -155,9 +156,8 @@ origin, `<admin>` = the admin's origin, `<cloud>` = the Cloudinary cloud name. N
 3. Instance: see B8 / section 9. **One instance** (W3).
 4. Health check path: `/health` (it pings the database) [Verified in code].
 5. Environment variables: section 6.1. Do **not** set `PORT` (Render provides it and the API reads it [Assumed:
-   Render sets `PORT`; Verified: the API listens on `PORT`]), `DATABASE_URL`, `SEED_ADMIN_*`, `STORAGE_LOCAL_DIR`,
-   `PDF_BROWSER_CHANNEL` or `PDF_BROWSER_PATH` (the image sets `PDF_BROWSER_PATH=/usr/bin/chromium` and
-   `NODE_ENV=production` [Verified]).
+   Render sets `PORT`; Verified: the API listens on `PORT`]), `DATABASE_URL`, `SEED_ADMIN_*` or `STORAGE_LOCAL_DIR`
+   (the image sets `NODE_ENV=production` [Verified]). The former `PDF_BROWSER_*` settings no longer exist.
 6. Deploy. In the logs, expect `server.started` with `"env":"production"`. Then `curl -s <api>/health` returns
    `{"success":true,"data":{"status":"ok"}}`. [Pending]
 7. Add Render's outbound IPs to Atlas (4.1 step 3) if the health check fails with a database timeout.
@@ -259,7 +259,7 @@ Local shapes below were checked without printing values [Verified 2026-10-13]. P
 | `DEFAULT_CURRENCY`, `SUPPORTED_CURRENCIES` | optional (`INR`, `INR,AED`) | same | |
 | `WHATSAPP_NUMBER` | optional | set | public business number |
 | `LOG_LEVEL` | optional (`info`) | `info` | |
-| not on Render | `PORT`, `DATABASE_URL`, `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, `STORAGE_LOCAL_DIR`, `PDF_BROWSER_*` | | |
+| not on Render | `PORT`, `DATABASE_URL`, `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, `STORAGE_LOCAL_DIR` (`PDF_BROWSER_*` no longer exist) | | |
 
 ### 6.2 Website (Vercel)
 
@@ -293,22 +293,23 @@ curl -s $API/health                                                    # {"succe
 curl -s "$API/api/public/packages?pageSize=48" | jq .meta.total         # number of published packages (12 today)
 curl -s $API/api/public/packages/dubai-city-highlights | jq -r .data.heroImage.url
                                                                        # https://res.cloudinary.com/<cloud>/image/upload/...
-curl -s $API/api/public/packages/dubai-city-highlights | jq -r .data.pdf.withLogoUrl
-                                                                       # must start with $API (API_URL is right)
-curl -s -D - -o /tmp/p.pdf "$API/api/public/packages/dubai-city-highlights/pdf?branding=with-logo" | grep -i 'content-type\|content-disposition'
-head -c 5 /tmp/p.pdf                                                   # %PDF-   (attachment; filename="getset-dubai-city-highlights-itinerary.pdf")
+curl -s $API/api/public/packages/<slug-with-a-pdf> | jq -r .data.pdf.url
+                                                                       # must start with $API (API_URL is right); null = no PDF yet
+curl -s -D - -o /tmp/p.pdf "$API/api/public/packages/<slug-with-a-pdf>/pdf" | grep -i 'content-type\|content-disposition'
+head -c 5 /tmp/p.pdf                                                   # %PDF-   (attachment; filename="getset-<slug>-itinerary.pdf")
+curl -s "$API/api/public/packages/<slug-without-a-pdf>/pdf"            # 404 {"code":"PDF_NOT_AVAILABLE",...}
 curl -s -o /dev/null -w '%{http_code}\n' $API/api/admin/packages       # 401 without a session
 curl -s -D - -o /dev/null -X OPTIONS $API/api/public/packages -H "Origin: https://<site>" -H 'Access-Control-Request-Method: GET' | grep -i access-control-allow-origin
                                                                        # https://<site>; a different Origin gets no such header
 ```
 
-The first PDF request after go-live may take a few seconds (W1: the PDF is rebuilt once).
+Upload the first itinerary PDF in the admin before these PDF checks (W1).
 
 ### Website
 
 - Home, `/packages`, a destination and three package pages load with every photo, on a phone and a computer.
-- The INR/AED switch changes every price; the PDF buttons download `getset-<slug>-itinerary.pdf` and
-  `…-no-logo.pdf`.
+- The INR/AED switch changes every price; "Download itinerary (PDF)" downloads `getset-<slug>-itinerary.pdf`; a package
+  without a PDF shows "Itinerary PDF not available yet" (and "PDF not available" in the phone's bottom bar).
 - The image optimiser refuses other hosts:
   `curl -s -o /dev/null -w '%{http_code}\n' "https://<site>/_next/image?url=https%3A%2F%2Fres.cloudinary.com%2Fdemo%2Fimage%2Fupload%2Fsample.jpg&w=640&q=75"` → `400`.
 - `https://<site>/sitemap.xml` lists `https://<site>/...` addresses (not localhost).
@@ -320,7 +321,8 @@ The first PDF request after go-live may take a few seconds (W1: the PDF is rebui
   email, 20 per address, per 15 minutes) [Verified in code]. Do not test with the real admin's email (it locks that
   account for 15 minutes).
 - In the browser's developer tools, the session cookie is `Secure`, `HttpOnly`, `SameSite=Lax`.
-- Packages, media (thumbnails from Cloudinary) and PDF previews open.
+- Packages, media (thumbnails from Cloudinary) and PDF previews open. In a package's PDF & publish tab, upload a PDF
+  (shown with name, size and date), preview it, replace it; on a draft, remove it (asks for confirmation).
 - Revalidation: change a content block (Content → Branch section heading), save, and the website shows it within a
   minute; change it back.
 - Sign out; opening an admin page then asks you to sign in again.
@@ -328,7 +330,8 @@ The first PDF request after go-live may take a few seconds (W1: the PDF is rebui
 
 ### Watch the API logs for
 
-`pdf.browser_unavailable` (Chromium did not start), `revalidate.rejected` / `revalidate.unreachable` (secret or
+`pdf.file_delete_failed` (a replaced or removed PDF could not be deleted from Cloudinary; its record is kept, archived,
+for clean-up), `pdf.read_failed` / `pdf.file_missing`, `revalidate.rejected` / `revalidate.unreachable` (secret or
 `FRONTEND_URL` wrong), `http.unhandled_error`, and database timeouts (Atlas network access).
 
 ## 8. Backups and restoring
@@ -380,28 +383,19 @@ Then set `MONGODB_DB_NAME=<db>_restore` on Render and redeploy. Writing to a new
 | `backups/backend-pre-mongodb-2026-10-12` | the pre-migration code's uncommitted work + `RESTORE.md` | rebuilds cleanly on top of commit `8165a2c` |
 
 **Media.** Images and PDFs live on Cloudinary. The 52 migrated images and the 8 original PDFs also exist locally
-(`storage/`, verified). Anything uploaded after Stage D exists only on Cloudinary (today: 1 test image), and every
-PDF can be regenerated from the data. Before relying on production uploads, decide on a Cloudinary backup (Cloudinary
+(`storage/`, verified). Anything uploaded after Stage D exists only on Cloudinary (today: 1 test image), including
+every itinerary PDF uploaded from now on (they are no longer generated, so they cannot be rebuilt from the data). Before relying on production uploads, decide on a Cloudinary backup (Cloudinary
 offers backups on paid plans [Assumed]) or a periodic download.
 
 ## 9. Render instance memory (B8)
 
-Measured 2026-10-13 in the Render image (Node 22 + Chromium), run with `NODE_ENV=production` against Atlas and
-Cloudinary under a hard memory limit without swap, printing both versions of all 12 packages in a row (24 PDFs, nothing
-stored) [Verified]:
+**Since 2026-10-14 (PDF generation removed) [Verified]:** the Render image (Node 22, no Chromium, 385 MB) ran as
+production against a throwaway MongoDB replica set: about 46 MB idle, and a **126 MB peak** while uploading,
+previewing and removing a 4 MB itinerary PDF. **Recommendation: Render Starter (0.5 CPU, 512 MB, $7/month).** Free is
+still unsuitable: it sleeps after 15 minutes idle, which breaks website builds and revalidation.
 
-| Container contents | Limit | Result | Peak memory |
-| --- | --- | --- | --- |
-| One Node process + Chromium (how the API prints in production) | 512 MB | 24 of 24 printed, no out-of-memory events | 477 MB (93 %) |
-| Same | 1 GB | 24 of 24 printed | 460 MB |
-| API server **plus** a second Node process + Chromium | 512 MB | printing failed: Chromium was killed for lack of memory (`OOMKilled`); the API stayed up | over 512 MB |
-
-Each print took up to about 3.5 s here; a smaller share of a CPU on Render will be slower [Assumed].
-
-**Recommendation:** 512 MB works, but with only about 35 MB to spare, and anything extra in the same moment (several
-visitors, the first-request PDF rebuild in W1, a Node upgrade) can push Chromium over the limit, which makes publishing
-and PDF downloads fail. Choose Render **Standard** (1 CPU, 2 GB, $25/month): Render has no 1 GB plan [Verified 2026-10-13, render.com/docs/compute-plans]. If you start
-on 512 MB, watch the logs for `pdf.render_failed` and the instance's memory graph.
+*Before (2026-10-13, historical):* with Chromium printing both versions of all 12 packages, the peak was 477 MB under a
+512 MB limit, and a second process in the container ran out of memory. That is why Standard (2 GB) was recommended then.
 
 ## 10. Rollback
 

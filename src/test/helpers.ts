@@ -69,6 +69,16 @@ export async function uploadPhoto(token: string, name = "photo.jpg", bytes: Uint
   return result.body.data.id as string;
 }
 
+/** A tiny but real PDF (it starts with the %PDF- signature the API checks). */
+export const PDF = Buffer.from("%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n");
+
+/** Uploads (or replaces) a package's itinerary PDF; returns the raw API result. */
+export function uploadPdf(token: string, packageId: string, bytes: Uint8Array = PDF, name = "itinerary.pdf", type = "application/pdf") {
+  const form = new FormData();
+  form.append("file", new File([bytes], name, { type }));
+  return api("PUT", `/api/admin/packages/${packageId}/itinerary-pdf`, { token, form });
+}
+
 /** Currencies, a branch, a destination, a category and a photo: enough to build packages on. */
 export async function catalogue(token: string) {
   await Currency.bulkWrite(
@@ -117,11 +127,12 @@ export const FULL_PRICES = [
   { currencyCode: "AED", priceType: "INFANT", amount: 400 },
 ];
 
-/** A draft package with everything publishing needs. */
+/** A draft package with everything publishing needs, including its itinerary PDF unless `pdf: false`. */
 export async function readyPackage(
   token: string,
   ids: Awaited<ReturnType<typeof catalogue>>,
   overrides: Record<string, unknown> = {},
+  { pdf = true }: { pdf?: boolean } = {},
 ) {
   const created = await api("POST", "/api/admin/packages", {
     token,
@@ -154,5 +165,9 @@ export async function readyPackage(
       ],
     },
   });
+  if (pdf) {
+    const uploaded = await uploadPdf(token, id);
+    if (uploaded.status !== 200) throw new Error(`PDF upload failed: ${JSON.stringify(uploaded.body)}`);
+  }
   return { id, slug: created.body.data.slug as string };
 }

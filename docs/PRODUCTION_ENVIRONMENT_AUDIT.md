@@ -30,6 +30,10 @@
 > - **2026-10-13: `TRUST_PROXY` now takes `cloudflare` (on Render) or `false`, and `true` is refused at start-up**
 >   (fix F2 in [HOSTING_READINESS_AUDIT.md](HOSTING_READINESS_AUDIT.md)). Wherever this report says
 >   `TRUST_PROXY=true`, use `TRUST_PROXY=cloudflare`.
+> - **2026-10-14: PDFs are uploaded, not generated.** The admin uploads one prepared itinerary PDF per package (up to
+>   4 MB, required to publish); the API stores it privately on Cloudinary and streams it. Chromium and the
+>   `PDF_BROWSER_*` settings are gone, so everything in this report about Chrome on Render (blocker 4) no longer applies.
+>   See [HOSTING_READINESS_AUDIT.md](HOSTING_READINESS_AUDIT.md).
 > - **Accepted risk:** by the owner's decision, the application uses `teamgetsetmedia_db_user` (`atlasAdmin@admin`)
 >   for development and production. See section 5. This configuration is **not production-secure**; this report
 >   does not and will not describe it as such.

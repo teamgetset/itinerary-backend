@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').cpSync('src/assets','dist/assets',{recursive:true})\"",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "tsx src/scripts/test.ts",
@@ -32,7 +32,6 @@
     "hono": "^4.13.13",
     "mongoose": "9.11.1",
     "pg": "^8.23.1",
-    "playwright-core": "^1.63.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {

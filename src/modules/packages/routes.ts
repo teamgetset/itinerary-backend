@@ -8,7 +8,7 @@ import { AppError, badRequest, notFound } from "../../lib/errors.ts";
 import { idParam, ok, readBody, readQuery, type AppEnv } from "../../lib/http.ts";
 import { requireRole } from "../auth/middleware.ts";
 import { audit } from "../audit.ts";
-import { PDF_MAX_BYTES, pdfHeaders, readItineraryPdf, removeItineraryPdf, uploadItineraryPdf } from "../pdf/itinerary-pdf.ts";
+import { PDF_MAX_BYTES, PDF_VERSIONS, pdfHeaders, pdfVersion, readItineraryPdf, removeItineraryPdf, uploadItineraryPdf } from "../pdf/itinerary-pdf.ts";
 import {
   activitiesInput,
   adminPackageQuery,
@@ -16,6 +16,7 @@ import {
   galleryInput,
   highlightsInput,
   hotelsInput,
+  importantInfoInput,
   inclusionsInput,
   itineraryInput,
   pricesInput,
@@ -34,7 +35,8 @@ import {
   saveGallery,
   saveHighlights,
   saveHotels,
-  saveInclusions,
+  saveImportantInfo,
+  saveListSection,
   saveItinerary,
   savePrices,
   setPackageStatus,
@@ -78,8 +80,10 @@ export const packageAdminRoutes = new Hono<AppEnv>()
   .post("/:id/duplicate", async (c) => ok(c, await editor(await duplicatePackage(idParam(c), c.get("admin"))), undefined, 201))
 
   .put("/:id/highlights", section(highlightsInput, saveHighlights))
-  .put("/:id/inclusions", section(inclusionsInput, (id, input, admin) => saveInclusions(id, input, admin, "inclusions")))
-  .put("/:id/exclusions", section(inclusionsInput, (id, input, admin) => saveInclusions(id, input, admin, "exclusions")))
+  .put("/:id/inclusions", section(inclusionsInput, (id, input, admin) => saveListSection(id, input, admin, "inclusions")))
+  .put("/:id/exclusions", section(inclusionsInput, (id, input, admin) => saveListSection(id, input, admin, "exclusions")))
+  .put("/:id/good-to-know", section(inclusionsInput, (id, input, admin) => saveListSection(id, input, admin, "goodToKnow")))
+  .put("/:id/important-info", section(importantInfoInput, saveImportantInfo))
   .put("/:id/itinerary", section(itineraryInput, saveItinerary))
   .put("/:id/prices", section(pricesInput, savePrices))
   .put("/:id/hotels", section(hotelsInput, saveHotels))
@@ -118,17 +122,18 @@ export const packageAdminRoutes = new Hono<AppEnv>()
     });
   })
 
-  /** The uploaded itinerary PDF, for checking in the admin. Never cached. */
-  .get("/:id/itinerary-pdf", async (c) => {
-    const pkg = await Package.findOne({ _id: idParam(c), deletedAt: null }, { itineraryPdfId: 1 }).lean<Pick<PackageDoc, "itineraryPdfId">>();
+  /** One version of the uploaded itinerary PDF (with-logo when none is named), for checking in the admin. Never cached. */
+  .get("/:id/itinerary-pdf/:version?", async (c) => {
+    const field = PDF_VERSIONS[pdfVersion(c.req.param("version"))];
+    const pkg = await Package.findOne({ _id: idParam(c), deletedAt: null }, { [field]: 1 }).lean<Pick<PackageDoc, typeof field>>();
     if (!pkg) throw notFound("Package");
-    const file = await readItineraryPdf(pkg.itineraryPdfId);
+    const file = await readItineraryPdf(pkg[field] ?? null);
     if (!file) throw notFound("Itinerary PDF");
     return c.body(new Uint8Array(file.data), 200, { ...pdfHeaders(file.row.fileName, file.data.length, "inline"), "Cache-Control": "private, no-store" });
   })
-  /** Upload or replace the itinerary PDF (multipart, field "file", up to 4 MB). */
+  /** Upload or replace one version of the itinerary PDF (multipart, field "file", up to 4 MB). */
   .put(
-    "/:id/itinerary-pdf",
+    "/:id/itinerary-pdf/:version?",
     requireRole("EDITOR"),
     bodyLimit({
       maxSize: PDF_MAX_BYTES + 64 * 1024,
@@ -141,9 +146,11 @@ export const packageAdminRoutes = new Hono<AppEnv>()
         throw badRequest("INVALID_UPLOAD", 'Send the PDF as multipart/form-data in a field named "file"');
       });
       if (!(form.file instanceof File)) throw badRequest("INVALID_UPLOAD", "Choose a PDF file to upload.");
-      return ok(c, await uploadItineraryPdf(idParam(c), form.file, c.get("admin")));
+      return ok(c, await uploadItineraryPdf(idParam(c), form.file, c.get("admin"), pdfVersion(c.req.param("version"))));
     },
   )
-  /** Remove the itinerary PDF of a package that is not published. */
-  .delete("/:id/itinerary-pdf", requireRole("ADMIN"), async (c) => ok(c, await removeItineraryPdf(idParam(c), c.get("admin"))));
+  /** Remove one version of the itinerary PDF (the one with the logo only while the package is not published). */
+  .delete("/:id/itinerary-pdf/:version?", requireRole("ADMIN"), async (c) =>
+    ok(c, await removeItineraryPdf(idParam(c), c.get("admin"), pdfVersion(c.req.param("version")))),
+  );
 

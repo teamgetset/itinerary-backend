@@ -245,7 +245,8 @@ Local shapes below were checked without printing values [Verified 2026-10-13]. P
 | `MONGODB_URI` | least-privilege user's string (section 5) | `mongodb+srv`, atlasAdmin user | secret |
 | `MONGODB_DB_NAME` | production database (D1) | `getset` | |
 | `API_URL` | `<api>` | `http://localhost:4000` | PDF links in API responses are built from it |
-| `FRONTEND_URL` | `<site>`, no trailing slash | `http://localhost:3000` | CORS, revalidation, printed on PDFs (W1) |
+| `FRONTEND_URL` | `<site>`: the canonical origin visitors end up on (`https://www.getsy.me`) | `http://localhost:3000` | CORS, revalidation, preview links |
+| `CORS_EXTRA_ORIGINS` | optional, comma-separated exact origins (`https://getsy.me`) | unset | CORS only |
 | `ADMIN_URL` | `<admin>`, no trailing slash | `http://localhost:3001` | CORS |
 | `AUTH_SECRET` | new, at least 32 characters | set, 64 characters | secret; signs draft preview links |
 | `REVALIDATE_SECRET` | new, at least 24 characters, same as the website's | set, 48 characters, equals the website's | secret |

@@ -72,11 +72,11 @@ export async function uploadPhoto(token: string, name = "photo.jpg", bytes: Uint
 /** A tiny but real PDF (it starts with the %PDF- signature the API checks). */
 export const PDF = Buffer.from("%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n");
 
-/** Uploads (or replaces) a package's itinerary PDF; returns the raw API result. */
-export function uploadPdf(token: string, packageId: string, bytes: Uint8Array = PDF, name = "itinerary.pdf", type = "application/pdf") {
+/** Uploads (or replaces) a package's itinerary PDF; returns the raw API result. `path` picks the version ("" = with logo). */
+export function uploadPdf(token: string, packageId: string, bytes: Uint8Array = PDF, name = "itinerary.pdf", type = "application/pdf", path = "") {
   const form = new FormData();
   form.append("file", new File([bytes], name, { type }));
-  return api("PUT", `/api/admin/packages/${packageId}/itinerary-pdf`, { token, form });
+  return api("PUT", `/api/admin/packages/${packageId}/itinerary-pdf${path}`, { token, form });
 }
 
 /** Currencies, a branch, a destination, a category and a photo: enough to build packages on. */

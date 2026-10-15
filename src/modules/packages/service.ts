@@ -35,6 +35,7 @@ import type {
   galleryInput,
   highlightsInput,
   hotelsInput,
+  importantInfoInput,
   inclusionsInput,
   itineraryInput,
   pricesInput,
@@ -127,7 +128,7 @@ export async function listAdminPackages(query: z.infer<typeof adminPackageQuery>
   ]);
 
   const ids = (field: "branchId" | "destinationId" | "categoryId") => [...new Set(docs.map((doc) => doc[field]).filter((id): id is string => !!id))];
-  const pdfIds = docs.map((doc) => doc.itineraryPdfId).filter((id): id is string => !!id);
+  const pdfIds = docs.flatMap((doc) => [doc.itineraryPdfId, doc.itineraryPdfWithoutLogoId]).filter((id): id is string => !!id);
   const [branches, destinations, categories, image, active, pdfs] = await Promise.all([
     Branch.find({ _id: { $in: ids("branchId") } }).lean<BranchDoc[]>(),
     Destination.find({ _id: { $in: ids("destinationId") } }).lean<DestinationDoc[]>(),
@@ -143,7 +144,10 @@ export async function listAdminPackages(query: z.infer<typeof adminPackageQuery>
     const branch = branchById.get(pkg.branchId)!;
     const destination = destinationById.get(pkg.destinationId)!;
     const category = pkg.categoryId ? categoryById.get(pkg.categoryId) : undefined;
-    const pdf = pkg.itineraryPdfId ? pdfById.get(pkg.itineraryPdfId) : undefined;
+    const pdfSummary = (mediaId: string | null | undefined) => {
+      const pdf = mediaId ? pdfById.get(mediaId) : undefined;
+      return pdf ? { fileName: pdf.fileName, sizeBytes: pdf.sizeBytes, uploadedAt: pdf.createdAt } : null;
+    };
     return {
       id: pkg._id,
       slug: pkg.slug,
@@ -159,7 +163,8 @@ export async function listAdminPackages(query: z.infer<typeof adminPackageQuery>
       prices: priceTable(pkg.prices, codes),
       seo: { title: pkg.seoTitle, description: pkg.seoDescription, noindex: pkg.noindex },
       heroImage: image(pkg.heroImageId),
-      itineraryPdf: pdf ? { fileName: pdf.fileName, sizeBytes: pdf.sizeBytes, uploadedAt: pdf.createdAt } : null,
+      itineraryPdf: pdfSummary(pkg.itineraryPdfId),
+      itineraryPdfWithoutLogo: pdfSummary(pkg.itineraryPdfWithoutLogoId),
       isFeatured: pkg.isFeatured,
       isRecommended: pkg.isRecommended,
       publishedAt: pkg.publishedAt,
@@ -233,6 +238,7 @@ export async function packageEditorDto(graph: PackageGraph) {
     })),
     activities: activityRows.map((row) => ({ activityId: row.activityId, activity: { name: row.activity.name } })),
     itineraryPdf: await itineraryPdfInfo(graph.itineraryPdfId),
+    itineraryPdfWithoutLogo: await itineraryPdfInfo(graph.itineraryPdfWithoutLogoId ?? null),
   };
 }
 
@@ -292,8 +298,11 @@ export const saveHighlights = (id: string, input: z.infer<typeof highlightsInput
     await refreshSearchText({ _id: id });
   });
 
-export const saveInclusions = (id: string, input: z.infer<typeof inclusionsInput>, admin: AdminContext, kind: "inclusions" | "exclusions") =>
+export const saveListSection = (id: string, input: z.infer<typeof inclusionsInput>, admin: AdminContext, kind: "inclusions" | "exclusions" | "goodToKnow") =>
   replaceSection(id, admin, kind, () => setSection(id, { [kind]: input.items.map((item) => ({ title: item.title, description: item.description ?? null })) }));
+
+export const saveImportantInfo = (id: string, input: z.infer<typeof importantInfoInput>, admin: AdminContext) =>
+  replaceSection(id, admin, "importantInfo", () => setSection(id, { importantInfo: input.items }));
 
 export async function saveItinerary(id: string, input: z.infer<typeof itineraryInput>, admin: AdminContext) {
   // References are checked up front so a bad hotel or activity gives a clear message, not a broken link.
@@ -413,7 +422,8 @@ export async function publishChecklist(graph: PackageGraph): Promise<ChecklistIt
             ? `The itinerary has ${days} days but the package lasts ${graph.durationDays}.`
             : undefined,
     },
-    { key: "itineraryPdf", label: "Itinerary PDF", ok: !!graph.itineraryPdfId, message: graph.itineraryPdfId ? undefined : "Upload the itinerary PDF." },
+    // Only the version with the logo is required; the one without it is optional.
+    { key: "itineraryPdf", label: "Itinerary PDF with logo", ok: !!graph.itineraryPdfId, message: graph.itineraryPdfId ? undefined : "Upload the itinerary PDF with the logo." },
   ];
 }
 
@@ -426,7 +436,7 @@ export async function publishPackage(id: string, admin: AdminContext) {
   }
   await transaction(async () => {
     await Package.updateOne({ _id: id }, { $set: { status: "PUBLISHED", publishedAt: graph.publishedAt ?? new Date(), updatedById: admin.id } });
-    await audit(admin, "PACKAGE_PUBLISHED", "package", id, { itineraryPdfId: graph.itineraryPdfId });
+    await audit(admin, "PACKAGE_PUBLISHED", "package", id, { itineraryPdfId: graph.itineraryPdfId, itineraryPdfWithoutLogoId: graph.itineraryPdfWithoutLogoId ?? null });
   });
   log.info("package.published", { packageId: id, adminUserId: admin.id });
   revalidate("catalog");
@@ -462,8 +472,9 @@ export async function duplicatePackage(id: string, admin: AdminContext) {
   return transaction(async () => {
     const {
       id: _id, slug, title, status: _status, publishedAt: _p, createdAt: _c, updatedAt: _u, deletedAt: _d,
-      // Each package owns its PDF file (replacing or removing it deletes the file), so a copy starts without one.
+      // Each package owns its PDF files (replacing or removing one deletes the file), so a copy starts without them.
       itineraryPdfId: _pdf,
+      itineraryPdfWithoutLogoId: _pdfWithoutLogo,
       branch: _b, destination: _de, category: _ca, activities: _a, hotels, itinerary, ...fields
     } = graph;
     const [copy] = await Package.create([

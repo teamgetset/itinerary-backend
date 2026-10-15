@@ -302,6 +302,89 @@ test("removing: if the file cannot be deleted, the response says so instead of c
     assert.ok((await mediaDoc(mediaId))?.deletedAt, "kept, archived, for clean-up");
   }));
 
+test("two versions, with and without the logo: stored separately, shown to the admin and the website, downloaded by name", async () => {
+  const pkg = await draft(true);
+  const withLogo = Buffer.concat([PDF, Buffer.from("% with logo\n")]);
+  const withoutLogo = Buffer.concat([PDF, Buffer.from("% without logo, a little longer\n")]);
+  assert.equal((await uploadPdf(admin.token, pkg.id, withLogo, "Dubai.pdf", "application/pdf", "/with-logo")).status, 200, "the version can be named");
+  const uploaded = await uploadPdf(editor.token, pkg.id, withoutLogo, "Dubai (no logo).pdf", "application/pdf", "/without-logo");
+  assert.equal(uploaded.status, 200, JSON.stringify(uploaded.body));
+  assert.equal(uploaded.body.data.version, "without-logo");
+  assert.equal(uploaded.body.data.pdf.fileName, "Dubai-no-logo.pdf");
+
+  // Two records and two files; the package points at each.
+  const doc = await pkgDoc(pkg.id);
+  assert.ok(doc.itineraryPdfId && doc.itineraryPdfWithoutLogoId && doc.itineraryPdfId !== doc.itineraryPdfWithoutLogoId);
+  assert.deepEqual(await storage.get((await mediaDoc(doc.itineraryPdfId))!.storageKey), withLogo);
+  assert.deepEqual(await storage.get((await mediaDoc(doc.itineraryPdfWithoutLogoId!))!.storageKey), withoutLogo);
+  const audited = await AuditLog.findOne({ action: "ITINERARY_PDF_UPLOADED", entityId: pkg.id, "metadata.version": "without-logo" }).lean();
+  assert.ok(audited, "the upload is audited with its version");
+
+  // The admin sees both, in the editor, the package list and the preview.
+  const editorView = (await api("GET", `/api/admin/packages/${pkg.id}`, { token: admin.token })).body.data;
+  assert.equal(editorView.itineraryPdf.sizeBytes, withLogo.length);
+  assert.equal(editorView.itineraryPdfWithoutLogo.sizeBytes, withoutLogo.length);
+  const row = (await api("GET", "/api/admin/packages?pageSize=100", { token: admin.token })).body.data.find((item: { id: string }) => item.id === pkg.id);
+  assert.equal(row.itineraryPdfWithoutLogo.fileName, "Dubai-no-logo.pdf");
+  const shown = await api("GET", `/api/admin/packages/${pkg.id}/itinerary-pdf/without-logo`, { token: editor.token });
+  assert.equal(shown.status, 200);
+  assert.equal(shown.headers.get("content-length"), String(withoutLogo.length));
+
+  // The website gets a link to each, and each link downloads its own file under its own name.
+  await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token: admin.token });
+  const detail = (await api("GET", `/api/public/packages/${pkg.slug}`)).body.data;
+  assert.match(detail.pdf.url, new RegExp(`/api/public/packages/${pkg.slug}/pdf$`));
+  assert.match(detail.pdfWithoutLogo.url, new RegExp(`/api/public/packages/${pkg.slug}/pdf\\?branding=without-logo$`));
+  assert.equal(detail.pdfWithoutLogo.sizeBytes, withoutLogo.length);
+  for (const [query, bytes, name] of [
+    ["", withLogo, `getset-${pkg.slug}-itinerary.pdf`],
+    ["?branding=with-logo", withLogo, `getset-${pkg.slug}-itinerary.pdf`],
+    ["?branding=without-logo", withoutLogo, `getset-${pkg.slug}-itinerary-no-logo.pdf`],
+  ] as const) {
+    const file = await download(pkg.slug, query);
+    assert.equal(file.status, 200, query);
+    assert.equal(file.headers.get("content-disposition"), `attachment; filename="${name}"`);
+    assert.equal(file.headers.get("content-length"), String(bytes.length), query);
+  }
+
+  // An unknown version is refused, not quietly mapped to another file.
+  assert.equal((await uploadPdf(admin.token, pkg.id, PDF, "x.pdf", "application/pdf", "/coloured")).status, 404);
+  assert.equal((await download(pkg.slug, "?branding=coloured")).status, 404);
+});
+
+test("the version without the logo is optional: publish without it, add, replace and remove it while live", async () => {
+  const pkg = await draft(true);
+  const published = await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token: admin.token });
+  assert.equal(published.status, 200, "only the version with the logo is required");
+  assert.equal((await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.pdfWithoutLogo, null);
+  assert.equal((await download(pkg.slug, "?branding=without-logo")).body.error.code, "PDF_NOT_AVAILABLE");
+
+  await uploadPdf(admin.token, pkg.id, PDF, "v1.pdf", "application/pdf", "/without-logo");
+  const first = (await pkgDoc(pkg.id)).itineraryPdfWithoutLogoId!;
+  const firstKey = (await mediaDoc(first))!.storageKey;
+  const withLogo = (await pkgDoc(pkg.id)).itineraryPdfId;
+  const replaced = await uploadPdf(admin.token, pkg.id, Buffer.concat([PDF, Buffer.from("% v2\n")]), "v2.pdf", "application/pdf", "/without-logo");
+  assert.equal(replaced.status, 200);
+  assert.equal(await mediaDoc(first), null, "the old record is gone");
+  assert.equal(await storage.get(firstKey), null, "the old file is gone");
+  assert.equal((await pkgDoc(pkg.id)).itineraryPdfId, withLogo, "the version with the logo is untouched");
+
+  const second = (await pkgDoc(pkg.id)).itineraryPdfWithoutLogoId!;
+  const secondKey = (await mediaDoc(second))!.storageKey;
+  assert.equal((await api("DELETE", `/api/admin/packages/${pkg.id}/itinerary-pdf/without-logo`, { token: editor.token })).status, 403);
+  const removed = await api("DELETE", `/api/admin/packages/${pkg.id}/itinerary-pdf/without-logo`, { token: admin.token });
+  assert.equal(removed.status, 200, "removable while live");
+  assert.deepEqual(removed.body.data, { removed: true, fileDeleted: true });
+  assert.equal((await pkgDoc(pkg.id)).itineraryPdfWithoutLogoId, null);
+  assert.equal(await storage.get(secondKey), null);
+  assert.ok(await AuditLog.exists({ action: "ITINERARY_PDF_REMOVED", entityId: pkg.id, "metadata.version": "without-logo" }));
+  assert.equal((await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.pdfWithoutLogo, null);
+  assert.equal((await download(pkg.slug)).status, 200, "the version with the logo is still downloadable");
+
+  const live = await api("DELETE", `/api/admin/packages/${pkg.id}/itinerary-pdf/with-logo`, { token: admin.token });
+  assert.equal(live.body.error.code, "PDF_REQUIRED", "the version with the logo still cannot be removed while live");
+});
+
 test("the media library cannot archive a package's PDF; other files are archived as before", async () => {
   const pkg = await draft(true);
   const mediaId = (await pkgDoc(pkg.id)).itineraryPdfId!;
@@ -310,6 +393,9 @@ test("the media library cannot archive a package's PDF; other files are archived
   assert.equal(refused.body.error.code, "IN_USE");
   assert.equal((await mediaDoc(mediaId))!.deletedAt, null, "still live");
   assert.equal((await preview(pkg.id)).status, 200, "still served");
+  await uploadPdf(admin.token, pkg.id, PDF, "no-logo.pdf", "application/pdf", "/without-logo");
+  const withoutLogo = (await pkgDoc(pkg.id)).itineraryPdfWithoutLogoId!;
+  assert.equal((await api("DELETE", `/api/admin/media/${withoutLogo}`, { token: admin.token })).status, 409, "the version without the logo too");
 
   const photo = await uploadPhoto(admin.token);
   assert.equal((await api("DELETE", `/api/admin/media/${photo}`, { token: admin.token })).status, 200);
@@ -319,7 +405,7 @@ test("the public download streams the private file with a safe name; no storage 
   onFakeCloudinary(async () => {
     const pkg = await draft(true);
     await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token: admin.token });
-    for (const query of ["", "?branding=without-logo"]) {
+    for (const query of ["", "?branding=with-logo"]) {
       const file = await download(pkg.slug, query);
       assert.equal(file.status, 200);
       assert.equal(file.headers.get("content-type"), "application/pdf");
@@ -341,6 +427,7 @@ test("no PDF: the page still works (pdf: null) and the download answers 'not ava
   const detail = await api("GET", `/api/public/packages/${pkg.slug}`);
   assert.equal(detail.status, 200);
   assert.equal(detail.body.data.pdf, null);
+  assert.equal(detail.body.data.pdfWithoutLogo, null);
   const missing = await download(pkg.slug);
   assert.equal(missing.status, 404);
   assert.equal(missing.body.error.code, "PDF_NOT_AVAILABLE");
@@ -362,7 +449,7 @@ test("publishing needs the PDF; once uploaded it is allowed", async () => {
   const blocked = await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token: admin.token });
   assert.equal(blocked.status, 422);
   assert.equal(blocked.body.error.code, "PUBLISH_BLOCKED");
-  assert.deepEqual(blocked.body.error.details, [{ path: "itineraryPdf", message: "Upload the itinerary PDF." }]);
+  assert.deepEqual(blocked.body.error.details, [{ path: "itineraryPdf", message: "Upload the itinerary PDF with the logo." }]);
   assert.equal((await pkgDoc(pkg.id)).status, "DRAFT");
 
   await uploadPdf(admin.token, pkg.id);
@@ -371,11 +458,13 @@ test("publishing needs the PDF; once uploaded it is allowed", async () => {
   assert.equal((await pkgDoc(pkg.id)).status, "PUBLISHED");
 });
 
-test("a duplicate starts without a PDF (each package owns its file)", async () => {
+test("a duplicate starts without PDFs (each package owns its files)", async () => {
   const pkg = await draft(true);
+  await uploadPdf(admin.token, pkg.id, PDF, "no-logo.pdf", "application/pdf", "/without-logo");
   const copy = await api("POST", `/api/admin/packages/${pkg.id}/duplicate`, { token: admin.token });
   assert.equal(copy.status, 201);
   assert.equal(copy.body.data.itineraryPdf, null);
+  assert.equal(copy.body.data.itineraryPdfWithoutLogo, null);
   assert.ok((await pkgDoc(pkg.id)).itineraryPdfId, "the original keeps its PDF");
 });
 

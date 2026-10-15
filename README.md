@@ -24,9 +24,11 @@ npm run dev                   # http://localhost:4000
 | `migrate:pg-to-mongo` | One-off copy of the former PostgreSQL data (dry run; `-- --apply`, `-- --verify`, `-- --export <dir>`). Read-only on PostgreSQL |
 | `pg:dev`, `pg:status`, `pg:migrate`, `pg:verify`, `pg:generate` | LEGACY PostgreSQL tooling (`src/legacy-postgres/`), kept for the migration and rollback until sign-off |
 
-Itinerary PDFs are prepared outside GETSET and uploaded in the admin (PDF only, up to 4 MB; one per package, required to
-publish). The API stores them privately (Cloudinary `raw/authenticated` under `CLOUDINARY_FOLDER`) and streams them at
-`GET /api/public/packages/<slug>/pdf`; admin routes: `PUT`/`DELETE`/`GET /api/admin/packages/<id>/itinerary-pdf`.
+Itinerary PDFs are prepared outside GETSET and uploaded in the admin (PDF only, up to 4 MB), in two versions per
+package: with the GETSET logo (required to publish) and without it (optional). The API stores them privately
+(Cloudinary `raw/authenticated` under `CLOUDINARY_FOLDER`) and streams them at `GET /api/public/packages/<slug>/pdf`
+(`?branding=without-logo` for the other version); admin routes: `PUT`/`DELETE`/`GET
+/api/admin/packages/<id>/itinerary-pdf` (with logo) and `.../itinerary-pdf/without-logo`.
 Replacing or removing one deletes the old file; a file that cannot be deleted is logged (`pdf.file_delete_failed`) and its
 media record kept, archived, for clean-up. The API no longer generates PDFs (no Chromium).
 

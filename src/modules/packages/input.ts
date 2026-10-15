@@ -42,7 +42,10 @@ export const updatePackageInput = packageInput.partial();
 const listItem = z.object({ title: z.string().trim().min(1, "Text is required.").max(300), description: nullableText(1000) });
 
 export const highlightsInput = z.object({ items: z.array(listItem.extend({ icon: nullableText(40) })).max(30) });
+/** Inclusions, exclusions and "Good to know": short texts with optional detail. */
 export const inclusionsInput = z.object({ items: z.array(listItem).max(60) });
+/** "Important information": one line each, shown after the site-wide notes (same limits as before). */
+export const importantInfoInput = z.object({ items: z.array(z.string().trim().min(1, "Text is required.").max(300)).max(20) });
 
 export const itineraryInput = z.object({
   days: z

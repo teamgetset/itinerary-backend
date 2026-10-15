@@ -55,7 +55,8 @@ export function createApp() {
   app.use(
     "/api/*",
     cors({
-      origin: [env.FRONTEND_URL, env.ADMIN_URL],
+      // Exact origins only. The website's apex and www addresses are both listed when it uses both (CORS_EXTRA_ORIGINS).
+      origin: [env.FRONTEND_URL, env.ADMIN_URL, ...env.CORS_EXTRA_ORIGINS],
       allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
       allowHeaders: ["Content-Type", "Authorization", "X-Request-Id"],
       maxAge: 600,

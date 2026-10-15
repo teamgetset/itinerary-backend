@@ -26,6 +26,7 @@ import { getContentBlock } from "../content.ts";
 import { activeCurrencies } from "../currencies.ts";
 import { destinationDto } from "../destinations.ts";
 import { loadImages, type ImageDto } from "../media/dto.ts";
+import { PDF_VERSIONS, type PdfVersion } from "../pdf/itinerary-pdf.ts";
 import { seoDto } from "../shared.ts";
 import { testimonialsForPackages } from "../testimonials.ts";
 
@@ -44,11 +45,13 @@ export function priceTable(rows: Pick<PackagePrice, "priceType" | "currencyCode"
   return table;
 }
 
-/** The uploaded itinerary PDF of a published package (downloaded through the API), or null when there is none. */
-async function pdfLink(graph: Pick<PackageGraph, "slug" | "status" | "itineraryPdfId">) {
-  if (graph.status !== "PUBLISHED" || !graph.itineraryPdfId) return null;
-  const file = await Media.findOne({ _id: graph.itineraryPdfId, deletedAt: null }, { sizeBytes: 1, createdAt: 1 }).lean<Pick<MediaDoc, "sizeBytes" | "createdAt">>();
-  return file ? { url: `${env.API_URL}/api/public/packages/${graph.slug}/pdf`, sizeBytes: file.sizeBytes, updatedAt: file.createdAt } : null;
+/** One version of a published package's uploaded itinerary PDF (downloaded through the API), or null when there is none. */
+async function pdfLink(graph: Pick<PackageGraph, "slug" | "status" | (typeof PDF_VERSIONS)[PdfVersion]>, version: PdfVersion) {
+  const mediaId = graph[PDF_VERSIONS[version]];
+  if (graph.status !== "PUBLISHED" || !mediaId) return null;
+  const file = await Media.findOne({ _id: mediaId, deletedAt: null }, { sizeBytes: 1, createdAt: 1 }).lean<Pick<MediaDoc, "sizeBytes" | "createdAt">>();
+  const query = version === "with-logo" ? "" : `?branding=${version}`;
+  return file ? { url: `${env.API_URL}/api/public/packages/${graph.slug}/pdf${query}`, sizeBytes: file.sizeBytes, updatedAt: file.createdAt } : null;
 }
 
 /**
@@ -341,12 +344,14 @@ export async function packageDetail(graph: PackageGraph) {
     })),
     /** Per traveller type and currency. */
     prices,
+    goodToKnow: (graph.goodToKnow ?? []).map(({ title, description }) => ({ title, description })),
     importantInfo: [...defaults.importantInfo, ...graph.importantInfo],
     terms: defaults.terms,
     destination: destinationDto(graph.destination, image),
     branch: branchDto(graph.branch, image),
     reviews: reviews.get(graph.id) ?? [],
-    pdf: await pdfLink(graph),
+    pdf: await pdfLink(graph, "with-logo"),
+    pdfWithoutLogo: await pdfLink(graph, "without-logo"),
     seo: seoDto(graph, image),
     publishedAt: graph.publishedAt,
     updatedAt: graph.updatedAt,

@@ -10,8 +10,9 @@ import { revalidate } from "../revalidate.ts";
 import { safeFileName } from "../storage.ts";
 
 /*
- * Itinerary PDFs are prepared outside GETSET and uploaded by an admin: one per package, required to publish.
- * They are stored privately (Cloudinary raw/authenticated, or local disk) and only ever streamed by the API.
+ * Itinerary PDFs are prepared outside GETSET and uploaded by an admin, in two versions per package: with the GETSET
+ * logo (required to publish) and without it (optional). They are stored privately (Cloudinary raw/authenticated, or
+ * local disk) and only ever streamed by the API.
  *
  * The package never points at a missing file: a new upload is stored and verified, then recorded and switched to in one
  * transaction (which also archives the old record), and only then is the old file deleted, followed by its record.
@@ -24,6 +25,20 @@ export const PDF_MAX_BYTES = 4 * 1024 * 1024;
 const PDF_SIGNATURE = Buffer.from("%PDF-");
 
 export const pdfNotAvailable = () => new AppError(404, "PDF_NOT_AVAILABLE", "The itinerary PDF for this package is not available yet.");
+
+/** The two versions, by the name used in URLs, and the package field holding each. "with-logo" is the original one. */
+export const PDF_VERSIONS = { "with-logo": "itineraryPdfId", "without-logo": "itineraryPdfWithoutLogoId" } as const;
+export type PdfVersion = keyof typeof PDF_VERSIONS;
+
+/** The version named in a URL; none means "with-logo", so links from before there were two keep working. */
+export function pdfVersion(value: string | undefined): PdfVersion {
+  if (!value) return "with-logo";
+  if (Object.hasOwn(PDF_VERSIONS, value)) return value as PdfVersion;
+  throw notFound("Itinerary PDF version");
+}
+
+/** A filter matching any package that uses `mediaId` as one of its itinerary PDFs. */
+export const usesPdf = (mediaId: string) => ({ $or: Object.values(PDF_VERSIONS).map((field) => ({ [field]: mediaId })) });
 
 /** Checks an upload: not empty, not too large, declared as a PDF, and really one (its first bytes). */
 export function checkPdf(file: File, data: Buffer) {
@@ -68,8 +83,9 @@ async function deleteUnusedPdf(mediaId: string): Promise<boolean> {
 
 const LEFT_BEHIND = "could not be deleted from storage. The failure is logged so the file can be cleaned up.";
 
-/** Uploads a package's itinerary PDF, replacing the current one if there is one. */
-export async function uploadItineraryPdf(packageId: string, file: File, admin: AdminContext) {
+/** Uploads one version of a package's itinerary PDF, replacing the current file of that version if there is one. */
+export async function uploadItineraryPdf(packageId: string, file: File, admin: AdminContext, version: PdfVersion = "with-logo") {
+  const field = PDF_VERSIONS[version];
   const pkg = await Package.findOne({ _id: packageId, deletedAt: null }, { status: 1 }).lean<Pick<PackageDoc, "status">>();
   if (!pkg) throw notFound("Package");
   const data = Buffer.from(await file.arrayBuffer());
@@ -88,7 +104,7 @@ export async function uploadItineraryPdf(packageId: string, file: File, admin: A
   let previousId: string | null;
   try {
     previousId = await transaction(async () => {
-      const current = await Package.findOne({ _id: packageId, deletedAt: null }, { itineraryPdfId: 1 }).lean<Pick<PackageDoc, "itineraryPdfId">>();
+      const current = await Package.findOne({ _id: packageId, deletedAt: null }, { [field]: 1 }).lean<Pick<PackageDoc, typeof field>>();
       if (!current) throw notFound("Package");
       await Media.create([
         {
@@ -103,10 +119,11 @@ export async function uploadItineraryPdf(packageId: string, file: File, admin: A
           uploadedById: admin.id,
         },
       ]);
-      await Package.updateOne({ _id: packageId }, { $set: { itineraryPdfId: mediaId, updatedById: admin.id } });
-      const previous = current.itineraryPdfId;
+      await Package.updateOne({ _id: packageId }, { $set: { [field]: mediaId, updatedById: admin.id } });
+      const previous = current[field] ?? null;
       if (previous) await Media.updateOne({ _id: previous }, { $set: { deletedAt: new Date() } });
       await audit(admin, previous ? "ITINERARY_PDF_REPLACED" : "ITINERARY_PDF_UPLOADED", "package", packageId, {
+        version,
         mediaId,
         fileName,
         sizeBytes: data.length,
@@ -119,7 +136,7 @@ export async function uploadItineraryPdf(packageId: string, file: File, admin: A
     // orphan. But the error can arrive after a commit (an unknown commit result), so the file is deleted only once no
     // package is confirmed to point at it; if that cannot be checked, it is kept and logged for clean-up.
     const where = { packageId, mediaId, storageKey: stored.storageKey };
-    const inUse = await Package.exists({ itineraryPdfId: mediaId }).then(Boolean, (lookup) => {
+    const inUse = await Package.exists(usesPdf(mediaId)).then(Boolean, (lookup) => {
       log.error("pdf.discard_skipped", { ...where, reason: "lookup_failed", error: lookup });
       return null;
     });
@@ -130,29 +147,36 @@ export async function uploadItineraryPdf(packageId: string, file: File, admin: A
 
   const previousDeleted = previousId ? await deleteUnusedPdf(previousId) : true;
   if (pkg.status === "PUBLISHED") revalidate("catalog");
-  log.info(previousId ? "pdf.replaced" : "pdf.uploaded", { packageId, mediaId, bytes: data.length, adminUserId: admin.id });
+  log.info(previousId ? "pdf.replaced" : "pdf.uploaded", { packageId, version, mediaId, bytes: data.length, adminUserId: admin.id });
   return {
+    version,
     pdf: await itineraryPdfInfo(mediaId),
     ...(!previousDeleted && { warning: `The new PDF is live, but the previous file ${LEFT_BEHIND}` }),
   };
 }
 
-/** Removes a draft or archived package's PDF. A published package must keep one (replace it instead). */
-export async function removeItineraryPdf(packageId: string, admin: AdminContext) {
-  const mediaId = await transaction(async () => {
-    const pkg = await Package.findOne({ _id: packageId, deletedAt: null }, { itineraryPdfId: 1, status: 1 }).lean<Pick<PackageDoc, "itineraryPdfId" | "status">>();
+/**
+ * Removes one version of a package's PDF. A published package must keep the version with the logo (replace it
+ * instead); the version without it can always be removed.
+ */
+export async function removeItineraryPdf(packageId: string, admin: AdminContext, version: PdfVersion = "with-logo") {
+  const field = PDF_VERSIONS[version];
+  const { mediaId, published } = await transaction(async () => {
+    const pkg = await Package.findOne({ _id: packageId, deletedAt: null }, { [field]: 1, status: 1 }).lean<Pick<PackageDoc, typeof field | "status">>();
     if (!pkg) throw notFound("Package");
-    if (!pkg.itineraryPdfId) throw notFound("Itinerary PDF");
-    if (pkg.status === "PUBLISHED") {
-      throw conflict("PDF_REQUIRED", "A published package needs its itinerary PDF. Upload a replacement, or unpublish the package first.");
+    const current = pkg[field];
+    if (!current) throw notFound("Itinerary PDF");
+    if (version === "with-logo" && pkg.status === "PUBLISHED") {
+      throw conflict("PDF_REQUIRED", "A published package needs its itinerary PDF with the logo. Upload a replacement, or unpublish the package first.");
     }
-    await Package.updateOne({ _id: packageId }, { $set: { itineraryPdfId: null, updatedById: admin.id } });
-    await Media.updateOne({ _id: pkg.itineraryPdfId }, { $set: { deletedAt: new Date() } });
-    await audit(admin, "ITINERARY_PDF_REMOVED", "package", packageId, { mediaId: pkg.itineraryPdfId });
-    return pkg.itineraryPdfId;
+    await Package.updateOne({ _id: packageId }, { $set: { [field]: null, updatedById: admin.id } });
+    await Media.updateOne({ _id: current }, { $set: { deletedAt: new Date() } });
+    await audit(admin, "ITINERARY_PDF_REMOVED", "package", packageId, { version, mediaId: current });
+    return { mediaId: current, published: pkg.status === "PUBLISHED" };
   });
   const fileDeleted = await deleteUnusedPdf(mediaId);
-  log.info("pdf.removed", { packageId, mediaId, fileDeleted, adminUserId: admin.id });
+  if (published) revalidate("catalog");
+  log.info("pdf.removed", { packageId, version, mediaId, fileDeleted, adminUserId: admin.id });
   return { removed: true, fileDeleted, ...(!fileDeleted && { warning: `The PDF was removed from the package, but its file ${LEFT_BEHIND}` }) };
 }
 

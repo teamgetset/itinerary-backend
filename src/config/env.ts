@@ -15,6 +15,20 @@ const list = z
   .string()
   .transform((value) => value.split(",").map((item) => item.trim().toUpperCase()).filter(Boolean));
 
+/**
+ * A site's origin exactly as browsers send it in the Origin header (scheme, host, port; no path). A trailing slash is
+ * dropped, because CORS compares the strings exactly and "https://www.example.com/" would never match.
+ */
+export const originUrl = z
+  .url()
+  .refine((value) => {
+    // Zod still runs this after the URL check fails, so a non-URL must not reach `new URL`.
+    if (!URL.canParse(value)) return false;
+    const url = new URL(value);
+    return url.pathname === "/" && !url.search && !url.hash && !url.username && !url.password;
+  }, "must be just an origin, like https://www.example.com (no path)")
+  .transform((value) => new URL(value).origin);
+
 const schema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -27,8 +41,17 @@ const schema = z
 
     /** Public base URL of this API. Media and PDF links are built from it. */
     API_URL: z.url(),
-    FRONTEND_URL: z.url(),
-    ADMIN_URL: z.url(),
+    /** The website's canonical origin (the one visitors end up on): CORS, preview links and cache refreshes. */
+    FRONTEND_URL: originUrl,
+    ADMIN_URL: originUrl,
+    /**
+     * More browser origins allowed to call the API (CORS), comma-separated: e.g. https://getsy.me when FRONTEND_URL is
+     * https://www.getsy.me. Exact origins only; never a wildcard.
+     */
+    CORS_EXTRA_ORIGINS: z.preprocess(
+      (value) => (typeof value === "string" ? value.split(",").map((item) => item.trim()).filter(Boolean) : []),
+      z.array(originUrl),
+    ),
 
     /** Signs draft preview links. Long random string, server only. */
     AUTH_SECRET: z.string().min(32, "must be at least 32 characters"),

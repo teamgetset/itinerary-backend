@@ -275,8 +275,10 @@ export interface PackageDoc extends Seo, Timestamps {
   arrivalAirportCode: string | null;
   arrivalCity: string | null;
   heroImageId: string | null;
-  /** The uploaded itinerary PDF (a DOCUMENT media record); required to publish. */
+  /** The uploaded itinerary PDF with the GETSET logo (a DOCUMENT media record); required to publish. */
   itineraryPdfId: string | null;
+  /** The same itinerary without the logo; optional. Missing on packages saved before it existed. */
+  itineraryPdfWithoutLogoId?: string | null;
   keywords: string[];
   importantInfo: string[];
   status: PackageStatus;
@@ -294,6 +296,8 @@ export interface PackageDoc extends Seo, Timestamps {
   highlights: Highlight[];
   inclusions: ListItem[];
   exclusions: ListItem[];
+  /** Practical tips for this trip ("Good to know" on the package page). Missing on packages saved before it existed. */
+  goodToKnow?: ListItem[];
   prices: PackagePrice[];
   hotels: PackageHotel[];
   activityIds: string[];
@@ -668,6 +672,7 @@ const packageSchema = new Schema<PackageDoc>(
     arrivalCity: text(false),
     heroImageId: ref,
     itineraryPdfId: ref,
+    itineraryPdfWithoutLogoId: ref,
     keywords: { type: [String], default: [] },
     importantInfo: { type: [String], default: [] },
     status: { type: String, enum: PACKAGE_STATUSES, required: true, default: "DRAFT" },
@@ -684,6 +689,7 @@ const packageSchema = new Schema<PackageDoc>(
     highlights: { type: [highlightSchema], default: [] },
     inclusions: { type: [listItemSchema], default: [] },
     exclusions: { type: [listItemSchema], default: [] },
+    goodToKnow: { type: [listItemSchema], default: [] },
     prices: { type: [packagePriceSchema], default: [] },
     hotels: { type: [packageHotelSchema], default: [] },
     activityIds: { type: [String], default: [] },
@@ -865,6 +871,7 @@ export const REFERENCES: { from: Model<any>; path: string; to: Model<any> }[] = 
   { from: Package, path: "categoryId", to: Category },
   { from: Package, path: "heroImageId", to: Media },
   { from: Package, path: "itineraryPdfId", to: Media },
+  { from: Package, path: "itineraryPdfWithoutLogoId", to: Media },
   { from: Package, path: "ogImageId", to: Media },
   { from: Package, path: "createdById", to: AdminUser },
   { from: Package, path: "updatedById", to: AdminUser },

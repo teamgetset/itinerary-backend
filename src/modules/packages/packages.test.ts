@@ -254,6 +254,52 @@ test("preview links show drafts to whoever holds the link, until they expire", a
   assert.equal((await api("GET", `/api/public/preview/packages/${pkg.id}?token=${encodeURIComponent(expired)}`)).status, 403);
 });
 
+test("good to know and important information: saved per package, shown on its page after the site-wide notes", async () => {
+  const pkg = await readyPackage(token, ids, { title: "Info Trip" });
+  const editor = await signIn("EDITOR");
+  const put = (section: string, items: unknown[], as = editor.token) => api("PUT", `/api/admin/packages/${pkg.id}/${section}`, { token: as, body: { items } });
+  const tips = [
+    { title: "Dress code", description: "Cover shoulders and knees when visiting mosques." },
+    { title: "Tipping is welcome but not expected", description: null },
+  ];
+  const notes = ["Carry a printed copy of your hotel voucher.", "Desert safaris are not suitable during pregnancy."];
+
+  const savedTips = await put("good-to-know", tips);
+  assert.equal(savedTips.status, 200, JSON.stringify(savedTips.body));
+  assert.deepEqual(savedTips.body.data.goodToKnow.map(({ title, description }: { title: string; description: string | null }) => ({ title, description })), tips);
+  const savedNotes = await put("important-info", notes);
+  assert.equal(savedNotes.status, 200, JSON.stringify(savedNotes.body));
+  assert.deepEqual(savedNotes.body.data.importantInfo, notes);
+  for (const section of ["goodToKnow", "importantInfo"]) {
+    assert.ok(await AuditLog.exists({ action: "PACKAGE_UPDATED", entityId: pkg.id, "metadata.section": section }), section);
+  }
+
+  await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token });
+  const page = (await api("GET", `/api/public/packages/${pkg.slug}`)).body.data;
+  assert.deepEqual(page.goodToKnow, tips);
+  assert.deepEqual(page.importantInfo.slice(-2), notes, "the package's own notes come last");
+  assert.match(page.importantInfo[0], /passport/i, "the site-wide notes come first");
+
+  // Checked like every other section; nothing is saved when a list is invalid.
+  const blank = await put("good-to-know", [{ title: "  ", description: null }]);
+  assert.equal(blank.body.error.details[0].path, "items.0.title");
+  assert.equal(blank.body.error.details[0].message, "Text is required.");
+  assert.equal((await put("important-info", Array.from({ length: 21 }, (_, i) => `Note ${i + 1}`))).status, 400, "at most 20 notes");
+  assert.equal((await put("important-info", ["x".repeat(301)])).status, 400, "at most 300 characters each");
+  assert.equal((await put("important-info", notes, "")).status, 401);
+  assert.deepEqual((await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.goodToKnow, tips, "unchanged after the refused saves");
+
+  // A copy keeps both lists; emptying them hides the package's own content, the site-wide notes stay.
+  const copy = await api("POST", `/api/admin/packages/${pkg.id}/duplicate`, { token });
+  assert.deepEqual(copy.body.data.importantInfo, notes);
+  assert.equal(copy.body.data.goodToKnow.length, 2);
+  await put("good-to-know", []);
+  await put("important-info", []);
+  const emptied = (await api("GET", `/api/public/packages/${pkg.slug}`)).body.data;
+  assert.deepEqual(emptied.goodToKnow, []);
+  assert.ok(emptied.importantInfo.length > 0 && !emptied.importantInfo.some((line: string) => notes.includes(line)));
+});
+
 test("editors can edit packages but not publish them", async () => {
   const editor = await signIn("EDITOR");
   const pkg = await readyPackage(editor.token, ids, { title: "Editor Trip" });

@@ -10,6 +10,7 @@ import { contains } from "../../lib/text.ts";
 import { requireRole } from "../auth/middleware.ts";
 import { audit } from "../audit.ts";
 import { IMAGE_MAX_BYTES, safeFileName, sniffImage } from "../storage.ts";
+import { usesPdf } from "../pdf/itinerary-pdf.ts";
 import { mediaDto } from "./dto.ts";
 import { discardImage, storeImage, type StoredImage } from "./store.ts";
 
@@ -126,7 +127,7 @@ export const mediaAdminRoutes = new Hono<AppEnv>()
   .delete("/:id", requireRole("ADMIN"), async (c) => {
     const id = idParam(c);
     // Except a package's itinerary PDF, which is only served while its record is live: replace or remove it in the package.
-    if (await Package.exists({ itineraryPdfId: id })) throw inUse();
+    if (await Package.exists(usesPdf(id))) throw inUse();
     const archived = await Media.updateOne({ _id: id, deletedAt: null }, { $set: { deletedAt: new Date() } });
     if (!archived.matchedCount) throw notFound("File");
     await audit(c.get("admin"), "MEDIA_ARCHIVED", "media", id);

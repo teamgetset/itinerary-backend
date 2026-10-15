@@ -12,7 +12,7 @@ import { activeCurrencies, currencyDto } from "./currencies.ts";
 import { getPublicDestination, listPublicDestinations } from "./destinations.ts";
 import { createEnquiry, enquiryInput } from "./enquiries.ts";
 import { listPublicHeroSlides } from "./hero-slides.ts";
-import { pdfHeaders, pdfNotAvailable, readItineraryPdf } from "./pdf/itinerary-pdf.ts";
+import { PDF_VERSIONS, pdfHeaders, pdfNotAvailable, pdfVersion, readItineraryPdf } from "./pdf/itinerary-pdf.ts";
 import { getPublicPackage, listPublicPackages, loadPackageGraph, packageDetail, recommendations } from "./packages/read.ts";
 import { quote, quoteInput } from "./pricing.ts";
 import { search } from "./search.ts";
@@ -99,16 +99,17 @@ export const publicRoutes = new Hono<AppEnv>()
     return ok(c, items);
   })
   /**
-   * The package's uploaded itinerary PDF, streamed from private storage (no storage URL ever reaches the browser).
-   * The download name is built from the slug. An old ?branding= query is ignored.
+   * One version of the package's uploaded itinerary PDF, streamed from private storage (no storage URL ever reaches the
+   * browser): ?branding=without-logo, otherwise the one with the logo. The download name is built from the slug.
    */
   .get("/packages/:slug/pdf", async (c) => {
+    const version = pdfVersion(c.req.query("branding"));
     const graph = await getPublicPackage(slugParam(c.req.param("slug")));
     if (!graph) throw notFound("Package");
-    const file = await readItineraryPdf(graph.itineraryPdfId);
+    const file = await readItineraryPdf(graph[PDF_VERSIONS[version]] ?? null);
     if (!file) throw pdfNotAvailable();
     return c.body(new Uint8Array(file.data), 200, {
-      ...pdfHeaders(`getset-${graph.slug}-itinerary.pdf`, file.data.length, "attachment"),
+      ...pdfHeaders(`getset-${graph.slug}-itinerary${version === "without-logo" ? "-no-logo" : ""}.pdf`, file.data.length, "attachment"),
       "Cache-Control": "public, max-age=300",
     });
   })

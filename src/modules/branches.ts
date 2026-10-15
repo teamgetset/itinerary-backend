@@ -3,7 +3,6 @@ import { Branch, Enquiry, Media, Package, withId, type BranchDoc } from "../db/m
 import { notFound } from "../lib/errors.ts";
 import { crudRoutes, nullableText, optionalId } from "./crud.ts";
 import { loadImages, type ImageDto } from "./media/dto.ts";
-import { refreshSearchText } from "./packages/search-text.ts";
 import { seoDto, seoInput, slugInput, uniqueSlug, withImages } from "./shared.ts";
 
 type BranchRow = Omit<BranchDoc, "_id"> & { id: string };
@@ -52,7 +51,6 @@ export const branchAdminRoutes = crudRoutes({
   onDelete: async (id) => {
     await Enquiry.updateMany({ branchId: id }, { $set: { branchId: null } });
   },
-  afterSave: (id) => refreshSearchText({ branchId: id }),
   tags: ["catalog"],
   // Branches shape the whole site: only admins create, edit or remove them.
   roles: { write: "ADMIN", delete: "ADMIN" },

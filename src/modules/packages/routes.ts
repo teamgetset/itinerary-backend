@@ -35,6 +35,7 @@ import {
   saveGallery,
   saveHighlights,
   saveHotels,
+  saveGoodToKnow,
   saveImportantInfo,
   saveListSection,
   saveItinerary,
@@ -82,7 +83,7 @@ export const packageAdminRoutes = new Hono<AppEnv>()
   .put("/:id/highlights", section(highlightsInput, saveHighlights))
   .put("/:id/inclusions", section(inclusionsInput, (id, input, admin) => saveListSection(id, input, admin, "inclusions")))
   .put("/:id/exclusions", section(inclusionsInput, (id, input, admin) => saveListSection(id, input, admin, "exclusions")))
-  .put("/:id/good-to-know", section(inclusionsInput, (id, input, admin) => saveListSection(id, input, admin, "goodToKnow")))
+  .put("/:id/good-to-know", section(inclusionsInput, saveGoodToKnow))
   .put("/:id/important-info", section(importantInfoInput, saveImportantInfo))
   .put("/:id/itinerary", section(itineraryInput, saveItinerary))
   .put("/:id/prices", section(pricesInput, savePrices))

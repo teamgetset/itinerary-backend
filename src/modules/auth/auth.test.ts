@@ -69,6 +69,16 @@ test("roles: editors edit content, admins publish, only super admins manage acco
   assert.equal((await api("POST", "/api/admin/branches", { token: editor.token, body: {} })).status, 403);
   assert.equal((await api("GET", "/api/admin/audit-logs", { token: editor.token })).status, 403);
   assert.equal((await api("GET", "/api/admin/audit-logs", { token: admin.token })).status, 200);
+
+  // The admin users list's search: name or email, plain text (no sign-ins added here: they share one rate limit).
+  const emails = async (q: string) =>
+    (await api("GET", `/api/admin/admin-users?q=${encodeURIComponent(q)}`, { token: superAdmin.token })).body.data.map((u: { email: string }) => u.email);
+  assert.deepEqual(await emails(editor.email.toUpperCase()), [editor.email], "by email, ignoring case");
+  assert.ok((await emails("test editor")).includes(editor.email), "by name");
+  assert.equal((await emails("test editor")).includes(superAdmin.email), false);
+  assert.deepEqual(await emails("nobody-by-this-name"), []);
+  assert.deepEqual(await emails(".*"), [], "plain text, not a pattern");
+  assert.ok((await api("GET", "/api/admin/admin-users", { token: superAdmin.token })).body.data.length >= 3, "no search lists everyone");
 });
 
 test("super admins cannot lock the system out", async () => {

@@ -240,10 +240,12 @@ export async function loadPackageGraph(filter: Record<string, unknown>) {
   const branch = await Branch.findById(doc.branchId).lean<BranchDoc>();
   const destination = await Destination.findById(doc.destinationId).lean<DestinationDoc>();
   const category = doc.categoryId ? await Category.findById(doc.categoryId).lean<CategoryDoc>() : null;
-  const hotelIds = [...new Set([...doc.hotels.map((row) => row.hotelId), ...doc.itinerary.flatMap((day) => (day.hotelId ? [day.hotelId] : []))])];
+  const hotelIds = [...new Set([...doc.hotels, ...doc.itinerary].flatMap((row) => (row.hotelId ? [row.hotelId] : [])))];
   const hotels = new Map((hotelIds.length ? await Hotel.find({ _id: { $in: hotelIds } }).lean<HotelDoc[]>() : []).map((row) => [row._id, withId(row)]));
+  // The package's add-on activities and the catalogue activities its itinerary steps are linked to.
+  const activityIds = [...new Set([...doc.activityIds, ...doc.itinerary.flatMap((day) => day.activities.flatMap((entry) => (entry.activityId ? [entry.activityId] : [])))])];
   const activities = new Map(
-    (doc.activityIds.length ? await Activity.find({ _id: { $in: doc.activityIds } }).lean<ActivityDoc[]>() : []).map((row) => [row._id, withId(row)]),
+    (activityIds.length ? await Activity.find({ _id: { $in: activityIds } }).lean<ActivityDoc[]>() : []).map((row) => [row._id, withId(row)]),
   );
   // References are checked on every write, so these exist; a missing one means the data is damaged.
   if (!branch || !destination) throw new Error(`Package ${doc._id} points at a missing branch or destination`);
@@ -254,19 +256,39 @@ export async function loadPackageGraph(filter: Record<string, unknown>) {
     branch: withId(branch),
     destination: withId(destination),
     category: category ? withId(category) : null,
+    // A row without a hotel stays (hotel: null) so the admin keeps it; one pointing at a missing hotel is dropped.
     hotels: pkg.hotels.flatMap((row) => {
-      const hotel = hotels.get(row.hotelId);
-      return hotel ? [{ ...row, hotel }] : [];
+      const hotel = row.hotelId ? hotels.get(row.hotelId) : null;
+      return hotel === undefined ? [] : [{ ...row, hotel }];
     }),
     activities: pkg.activityIds.flatMap((activityId) => {
       const activity = activities.get(activityId);
       return activity ? [{ activityId, activity }] : [];
     }),
-    itinerary: pkg.itinerary.map((day) => ({ ...day, hotel: day.hotelId ? (hotels.get(day.hotelId) ?? null) : null })),
+    itinerary: pkg.itinerary.map((day) => ({
+      ...day,
+      hotel: day.hotelId ? (hotels.get(day.hotelId) ?? null) : null,
+      activities: day.activities.map((entry) => ({ ...entry, activity: entry.activityId ? (activities.get(entry.activityId) ?? null) : null })),
+    })),
   };
 }
 
 export type PackageGraph = NonNullable<Awaited<ReturnType<typeof loadPackageGraph>>>;
+
+/**
+ * What the package page shows under "Good to know" and "Important information", and what the admin edits for them.
+ * Once the package has its own lists (ownInfo), exactly those. Until then the shared content: the destination's travel
+ * facts and the notes for every package (Global content → Package defaults), each followed by anything the package
+ * added before it had its own lists.
+ */
+export function packageInfo(graph: Pick<PackageGraph, "ownInfo" | "goodToKnow" | "importantInfo" | "destination">, defaults: { importantInfo: string[] }) {
+  const goodToKnow = (graph.goodToKnow ?? []).map(({ title, description }) => ({ title, description: description ?? null }));
+  if (graph.ownInfo) return { goodToKnow, importantInfo: graph.importantInfo };
+  return {
+    goodToKnow: [...graph.destination.facts.map((fact) => ({ title: fact.label, description: fact.value })), ...goodToKnow],
+    importantInfo: [...defaults.importantInfo, ...graph.importantInfo],
+  };
+}
 
 /** "10:30:00" -> "10:30". */
 const shortTime = (time: string | null) => (time ? time.slice(0, 5) : null);
@@ -289,9 +311,10 @@ export async function packageDetail(graph: PackageGraph) {
     graph.destination.heroImageId,
     graph.destination.thumbnailImageId,
     graph.destination.ogImageId,
-    ...graph.hotels.map((row) => row.hotel.primaryImageId),
+    ...graph.hotels.map((row) => row.hotel?.primaryImageId),
     ...graph.activities.map((row) => row.activity.imageId),
     ...graph.itinerary.map((day) => day.imageId),
+    ...graph.itinerary.flatMap((day) => day.activities.map((entry) => entry.activity?.imageId)),
   ];
   const [image, currencies, defaults, reviews] = await Promise.all([
     loadImages(imageIds),
@@ -313,7 +336,8 @@ export async function packageDetail(graph: PackageGraph) {
       description: day.description,
       stay: day.stay,
       meals: day.meals,
-      hotel: day.hotel ? { name: day.hotel.name, starCategory: day.hotel.starCategory, location: day.hotel.location } : null,
+      // A hotel switched off in the catalogue is not shown, as with every catalogue entry on the public site.
+      hotel: day.hotel?.isActive ? { name: day.hotel.name, starCategory: day.hotel.starCategory, location: day.hotel.location } : null,
       image: image(day.imageId),
       activities: day.activities.map((activity) => ({
         time: shortTime(activity.time),
@@ -321,11 +345,22 @@ export async function packageDetail(graph: PackageGraph) {
         description: activity.description,
         location: activity.location,
         type: activity.type,
+        // The catalogue activity the step is linked to, while it is switched on (as everywhere on the public site).
+        activity: activity.activity?.isActive
+          ? {
+              slug: activity.activity.slug,
+              name: activity.activity.name,
+              description: activity.activity.description,
+              location: activity.activity.location,
+              image: image(activity.activity.imageId),
+            }
+          : null,
       })),
     })),
     inclusions: graph.inclusions.map(({ title, description }) => ({ title, description })),
     exclusions: graph.exclusions.map(({ title, description }) => ({ title, description })),
-    hotels: graph.hotels.map((row) => ({
+    // Only rows with a hotel that is switched on are published: anything else has nothing valid to show.
+    hotels: graph.hotels.flatMap(({ hotel, ...row }) => (hotel?.isActive ? [{ ...row, hotel }] : [])).map((row) => ({
       name: row.hotel.name,
       starCategory: row.hotel.starCategory,
       rating: row.hotel.rating,
@@ -336,18 +371,22 @@ export async function packageDetail(graph: PackageGraph) {
       isDefault: row.isDefault,
       image: image(row.hotel.primaryImageId),
     })),
-    activities: graph.activities.map((row) => ({
-      slug: row.activity.slug,
-      name: row.activity.name,
-      description: row.activity.description,
-      image: image(row.activity.imageId),
-    })),
+    // The experiences included in the package (its Activities tab), in the admin's order; switched-off ones are left out.
+    activities: graph.activities
+      .filter((row) => row.activity.isActive)
+      .map((row) => ({
+        slug: row.activity.slug,
+        name: row.activity.name,
+        description: row.activity.description,
+        location: row.activity.location,
+        image: image(row.activity.imageId),
+      })),
     /** Per traveller type and currency. */
     prices,
-    goodToKnow: (graph.goodToKnow ?? []).map(({ title, description }) => ({ title, description })),
-    importantInfo: [...defaults.importantInfo, ...graph.importantInfo],
+    ...packageInfo(graph, defaults),
     terms: defaults.terms,
-    destination: destinationDto(graph.destination, image),
+    // The travel facts are part of goodToKnow above; sent empty here so no page shows them twice.
+    destination: { ...destinationDto(graph.destination, image), facts: [] },
     branch: branchDto(graph.branch, image),
     reviews: reviews.get(graph.id) ?? [],
     pdf: await pdfLink(graph, "with-logo"),

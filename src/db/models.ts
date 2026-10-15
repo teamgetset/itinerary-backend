@@ -229,9 +229,10 @@ export interface PackagePrice {
   amount: number;
 }
 
+/** A hotel option. Every field is optional; a row without a hotel is kept for the admin but not published. */
 export interface PackageHotel {
-  hotelId: string;
-  nights: number;
+  hotelId: string | null;
+  nights: number | null;
   roomType: string | null;
   mealPlan: string | null;
   /** The hotel the listed price includes. Other entries are alternatives. */
@@ -296,8 +297,13 @@ export interface PackageDoc extends Seo, Timestamps {
   highlights: Highlight[];
   inclusions: ListItem[];
   exclusions: ListItem[];
-  /** Practical tips for this trip ("Good to know" on the package page). Missing on packages saved before it existed. */
+  /** "Good to know" on the package page, once the package has its own lists (ownInfo). Missing on older packages. */
   goodToKnow?: ListItem[];
+  /**
+   * Set when the package's "Good to know" and "Important information" are saved in the admin: from then on the page shows
+   * exactly its own lists. Until then it shows the shared content (destination travel facts, Global content notes).
+   */
+  ownInfo?: boolean;
   prices: PackagePrice[];
   hotels: PackageHotel[];
   activityIds: string[];
@@ -622,8 +628,8 @@ const packagePriceSchema = new Schema<PackagePrice>(
 );
 const packageHotelSchema = new Schema<PackageHotel>(
   {
-    hotelId: { type: String, required: true },
-    nights: { type: Number, required: true, min: 1 },
+    hotelId: ref,
+    nights: { type: Number, default: null, min: 1 },
     roomType: text(false),
     mealPlan: text(false),
     isDefault: flag(true),
@@ -690,6 +696,7 @@ const packageSchema = new Schema<PackageDoc>(
     inclusions: { type: [listItemSchema], default: [] },
     exclusions: { type: [listItemSchema], default: [] },
     goodToKnow: { type: [listItemSchema], default: [] },
+    ownInfo: flag(false),
     prices: { type: [packagePriceSchema], default: [] },
     hotels: { type: [packageHotelSchema], default: [] },
     activityIds: { type: [String], default: [] },

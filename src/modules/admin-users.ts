@@ -3,7 +3,8 @@ import { z } from "zod";
 import { AdminUser, defined, withId, type AdminUserDoc } from "../db/models.ts";
 import { hashPassword } from "../lib/crypto.ts";
 import { AppError, notFound } from "../lib/errors.ts";
-import { idParam, ok, readBody, type AppEnv } from "../lib/http.ts";
+import { idParam, ok, readBody, readQuery, type AppEnv } from "../lib/http.ts";
+import { contains } from "../lib/text.ts";
 import { audit } from "./audit.ts";
 import { publicAdminUser, revokeSessions } from "./auth/service.ts";
 
@@ -52,7 +53,11 @@ const activeSuperAdmins = (exceptId: string) => AdminUser.countDocuments({ role:
 
 export const adminUserRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
-    const rows = await AdminUser.find().sort({ name: 1 }).lean<AdminUserDoc[]>();
+    // The admin's search box: name or email. Few users, so no paging.
+    const { q } = readQuery(c, z.object({ q: z.string().trim().max(100).optional() }));
+    const rows = await AdminUser.find(q ? { $or: [{ name: contains(q) }, { email: contains(q) }] } : {})
+      .sort({ name: 1 })
+      .lean<AdminUserDoc[]>();
     return ok(c, rows.map(publicAdminUser));
   })
   .get("/:id", async (c) => {

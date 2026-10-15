@@ -44,8 +44,8 @@ const listItem = z.object({ title: z.string().trim().min(1, "Text is required.")
 export const highlightsInput = z.object({ items: z.array(listItem.extend({ icon: nullableText(40) })).max(30) });
 /** Inclusions, exclusions and "Good to know": short texts with optional detail. */
 export const inclusionsInput = z.object({ items: z.array(listItem).max(60) });
-/** "Important information": one line each, shown after the site-wide notes (same limits as before). */
-export const importantInfoInput = z.object({ items: z.array(z.string().trim().min(1, "Text is required.").max(300)).max(20) });
+/** "Important information": one line each. Up to 40: a package's own copy starts with the shared notes (up to 20) and its own. */
+export const importantInfoInput = z.object({ items: z.array(z.string().trim().min(1, "Text is required.").max(300)).max(40) });
 
 export const itineraryInput = z.object({
   days: z
@@ -113,8 +113,9 @@ export const hotelsInput = z.object({
   hotels: z
     .array(
       z.object({
-        hotelId: z.uuid("Choose a hotel."),
-        nights: z.number().int().min(1, "At least one night.").max(60),
+        // All optional: a row may be saved before its hotel or nights are known.
+        hotelId: optionalId,
+        nights: z.number().int().min(1, "At least one night.").max(60).nullish(),
         roomType: nullableText(80),
         mealPlan: nullableText(80),
         isDefault: z.boolean().optional(),

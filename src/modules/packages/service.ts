@@ -41,7 +41,8 @@ import type {
   pricesInput,
   updatePackageInput,
 } from "./input.ts";
-import { PRICE_TYPES, loadPackageGraph, priceTable, type PackageGraph } from "./read.ts";
+import { getContentBlock } from "../content.ts";
+import { PRICE_TYPES, loadPackageGraph, packageInfo, priceTable, type PackageGraph } from "./read.ts";
 import { refreshSearchText } from "./search-text.ts";
 
 type PackageRow = Omit<PackageDoc, "_id"> & { id: string };
@@ -230,7 +231,7 @@ export async function packageEditorDto(graph: PackageGraph) {
     prices: prices.map(({ currencyCode, priceType, amount }) => ({ currencyCode, priceType, amount })),
     hotels: hotelRows.map((row) => ({
       hotelId: row.hotelId,
-      hotel: { name: row.hotel.name, starCategory: row.hotel.starCategory, location: row.hotel.location },
+      hotel: row.hotel ? { name: row.hotel.name, starCategory: row.hotel.starCategory, location: row.hotel.location } : null,
       nights: row.nights,
       roomType: row.roomType,
       mealPlan: row.mealPlan,
@@ -239,6 +240,10 @@ export async function packageEditorDto(graph: PackageGraph) {
     activities: activityRows.map((row) => ({ activityId: row.activityId, activity: { name: row.activity.name } })),
     itineraryPdf: await itineraryPdfInfo(graph.itineraryPdfId),
     itineraryPdfWithoutLogo: await itineraryPdfInfo(graph.itineraryPdfWithoutLogoId ?? null),
+    // Exactly what the package page shows under "Good to know" and "Important information", and whether those are
+    // already the package's own lists or still the shared content (see packageInfo).
+    ...packageInfo(graph, await getContentBlock("package.defaults")),
+    ownInfo: !!graph.ownInfo,
   };
 }
 
@@ -298,11 +303,26 @@ export const saveHighlights = (id: string, input: z.infer<typeof highlightsInput
     await refreshSearchText({ _id: id });
   });
 
-export const saveListSection = (id: string, input: z.infer<typeof inclusionsInput>, admin: AdminContext, kind: "inclusions" | "exclusions" | "goodToKnow") =>
+export const saveListSection = (id: string, input: z.infer<typeof inclusionsInput>, admin: AdminContext, kind: "inclusions" | "exclusions") =>
   replaceSection(id, admin, kind, () => setSection(id, { [kind]: input.items.map((item) => ({ title: item.title, description: item.description ?? null })) }));
 
-export const saveImportantInfo = (id: string, input: z.infer<typeof importantInfoInput>, admin: AdminContext) =>
-  replaceSection(id, admin, "importantInfo", () => setSection(id, { importantInfo: input.items }));
+/** The package's "Good to know" and "Important information" as shown now (packageInfo). */
+const shownInfo = async (id: string) => packageInfo(await loadEditorGraph(id), await getContentBlock("package.defaults"));
+
+/**
+ * Saving either list gives the package its own copy of both (ownInfo): from then on its page shows exactly what was
+ * saved, and changes to the shared content no longer affect it. The other list is kept as it is shown now.
+ */
+export async function saveGoodToKnow(id: string, input: z.infer<typeof inclusionsInput>, admin: AdminContext) {
+  const { importantInfo } = await shownInfo(id);
+  const goodToKnow = input.items.map((item) => ({ title: item.title, description: item.description ?? null }));
+  await replaceSection(id, admin, "goodToKnow", () => setSection(id, { goodToKnow, importantInfo, ownInfo: true }));
+}
+
+export async function saveImportantInfo(id: string, input: z.infer<typeof importantInfoInput>, admin: AdminContext) {
+  const { goodToKnow } = await shownInfo(id);
+  await replaceSection(id, admin, "importantInfo", () => setSection(id, { importantInfo: input.items, goodToKnow, ownInfo: true }));
+}
 
 export async function saveItinerary(id: string, input: z.infer<typeof itineraryInput>, admin: AdminContext) {
   // References are checked up front so a bad hotel or activity gives a clear message, not a broken link.
@@ -347,12 +367,14 @@ export async function savePrices(id: string, input: z.infer<typeof pricesInput>,
 }
 
 export async function saveHotels(id: string, input: z.infer<typeof hotelsInput>, admin: AdminContext) {
-  await assertAllExist(Hotel, input.hotels.map((h) => h.hotelId), "hotels", "A selected hotel no longer exists.");
+  // A row with nothing filled in is dropped rather than stored empty.
+  const rows = input.hotels.filter((hotel) => hotel.hotelId || hotel.nights || hotel.roomType || hotel.mealPlan);
+  await assertAllExist(Hotel, rows.flatMap((h) => (h.hotelId ? [h.hotelId] : [])), "hotels", "A selected hotel no longer exists.");
   await replaceSection(id, admin, "hotels", () =>
     setSection(id, {
-      hotels: input.hotels.map((hotel) => ({
-        hotelId: hotel.hotelId,
-        nights: hotel.nights,
+      hotels: rows.map((hotel) => ({
+        hotelId: hotel.hotelId ?? null,
+        nights: hotel.nights ?? null,
         roomType: hotel.roomType ?? null,
         mealPlan: hotel.mealPlan ?? null,
         isDefault: hotel.isDefault ?? true,
@@ -481,7 +503,7 @@ export async function duplicatePackage(id: string, admin: AdminContext) {
       {
         ...fields,
         hotels: hotels.map(({ hotel: _h, ...row }) => row),
-        itinerary: itinerary.map(({ hotel: _h, ...day }) => day),
+        itinerary: itinerary.map(({ hotel: _h, ...day }) => ({ ...day, activities: day.activities.map(({ activity: _a, ...entry }) => entry) })),
         title: `${title} (copy)`,
         slug: await uniqueSlug(Package, `${slug}-copy`),
         status: "DRAFT",

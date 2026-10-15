@@ -74,6 +74,168 @@ test("itinerary: create days, update, reorder, add and remove timeline activitie
   assert.equal(noTitle.body.error.details[0].message, "Day title is required.");
 });
 
+test("itinerary hotels: the hotel chosen for a day is saved, shown to the admin and on the public page; deleting it unlinks", async () => {
+  const pkg = await readyPackage(token, ids, { title: "Hotel Trip" });
+  const hotel = await api("POST", "/api/admin/hotels", { token, body: { name: "lyf Funan Singapore", location: "Funan, Singapore", starCategory: 4 } });
+  assert.equal(hotel.status, 201, JSON.stringify(hotel.body));
+  const hotelId = hotel.body.data.id;
+  const days = [
+    { title: "Arrive", stay: "Singapore", hotelId },
+    { title: "City tour", stay: "Singapore", hotelId },
+    { title: "Depart" },
+  ];
+  const saved = await api("PUT", `/api/admin/packages/${pkg.id}/itinerary`, { token, body: { days } });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.deepEqual(saved.body.data.itinerary.map((d: { hotelId: string | null }) => d.hotelId), [hotelId, hotelId, null], "the editor gets the choice back");
+
+  await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token });
+  const page = (await api("GET", `/api/public/packages/${pkg.slug}`)).body.data;
+  assert.deepEqual(page.itinerary[0].hotel, { name: "lyf Funan Singapore", starCategory: 4, location: "Funan, Singapore" });
+  assert.deepEqual(page.itinerary[1].hotel, page.itinerary[0].hotel);
+  assert.equal(page.itinerary[2].hotel, null);
+
+  // Changing the choice on a live package shows the new hotel; an unknown hotel is refused and changes nothing.
+  const other = (await api("POST", "/api/admin/hotels", { token, body: { name: "Marina Bay Sands", location: "Marina Bay, Singapore", starCategory: 5 } })).body.data;
+  await api("PUT", `/api/admin/packages/${pkg.id}/itinerary`, { token, body: { days: [days[0], { ...days[1], hotelId: other.id }, days[2]] } });
+  assert.equal((await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.itinerary[1].hotel.name, "Marina Bay Sands");
+  const unknown = await api("PUT", `/api/admin/packages/${pkg.id}/itinerary`, { token, body: { days: [{ title: "X", hotelId: crypto.randomUUID() }] } });
+  assert.equal(unknown.body.error.details[0].message, "A selected hotel no longer exists.");
+  assert.equal((await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.itinerary.length, 3);
+
+  // A hotel used only by itinerary days can be deleted: those days lose the link, the rest of the day stays.
+  assert.equal((await api("DELETE", `/api/admin/hotels/${other.id}`, { token })).status, 200);
+  const after = (await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.itinerary;
+  assert.equal(after[1].hotel, null);
+  assert.equal(after[1].stay, "Singapore");
+  assert.equal(after[0].hotel.name, "lyf Funan Singapore");
+});
+
+test("activities tab: the experiences chosen are saved in order and published with their details", async () => {
+  const pkg = await readyPackage(token, ids, { title: "Experiences Trip" });
+  const make = async (body: Record<string, unknown>) => (await api("POST", "/api/admin/activities", { token, body })).body.data;
+  const cruise = await make({ name: "Dhow Cruise", description: "Dinner on a traditional dhow along the marina.", location: "Dubai Marina", imageId: ids.photoId });
+  const garden = await make({ name: "Miracle Garden", location: "Al Barsha South" });
+  const put = (activityIds: string[]) => api("PUT", `/api/admin/packages/${pkg.id}/activities`, { token, body: { activityIds } });
+  const shown = async () =>
+    (await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.activities.map((a: { name: string; description: string; location: string | null; image: unknown }) => [
+      a.name,
+      a.description || null,
+      a.location,
+      !!a.image,
+    ]);
+
+  const saved = await put([garden.id, cruise.id]);
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.deepEqual(saved.body.data.activities.map((a: { activityId: string }) => a.activityId), [garden.id, cruise.id], "the editor gets them back, in order");
+  await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token });
+  assert.deepEqual(await shown(), [
+    ["Miracle Garden", null, "Al Barsha South", false],
+    ["Dhow Cruise", "Dinner on a traditional dhow along the marina.", "Dubai Marina", true],
+  ]);
+
+  // Changing the choice on a live package; a switched-off activity is not shown; an unknown one is refused.
+  await put([cruise.id]);
+  assert.deepEqual((await shown()).map((row: unknown[]) => row[0]), ["Dhow Cruise"]);
+  await api("PATCH", `/api/admin/activities/${cruise.id}`, { token, body: { isActive: false } });
+  assert.deepEqual(await shown(), []);
+  await api("PATCH", `/api/admin/activities/${cruise.id}`, { token, body: { isActive: true } });
+  assert.equal((await put([crypto.randomUUID()])).body.error.details[0].message, "A selected activity no longer exists.");
+  assert.deepEqual((await shown()).map((row: unknown[]) => row[0]), ["Dhow Cruise"], "unchanged after the refused save");
+  await put([]);
+  assert.deepEqual(await shown(), []);
+});
+
+test("itinerary timeline: each step's type and its linked catalogue activity reach the public page", async () => {
+  const pkg = await readyPackage(token, ids, { title: "Timeline Trip" });
+  const safari = (
+    await api("POST", "/api/admin/activities", {
+      token,
+      body: { name: "Desert Safari", description: "Dune drive, camel ride and a barbecue dinner at a desert camp.", location: "Lahbab desert", imageId: ids.photoId },
+    })
+  ).body.data;
+  const steps = [
+    { time: "15:00", title: "Hotel pickup", type: "TRANSFER" },
+    { time: "16:30", title: "Dune drive", type: "ACTIVITY", activityId: safari.id },
+    { title: "Sunset at the camp", description: "Our own words.", location: "Camp Al Khayma", type: "ACTIVITY", activityId: safari.id },
+    { title: "Something else" },
+  ];
+  const saved = await api("PUT", `/api/admin/packages/${pkg.id}/itinerary`, { token, body: { days: [{ title: "Desert day", activities: steps }] } });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.deepEqual(
+    saved.body.data.itinerary[0].activities.map((a: { type: string; activityId: string | null }) => [a.type, a.activityId]),
+    [["TRANSFER", null], ["ACTIVITY", safari.id], ["ACTIVITY", safari.id], ["OTHER", null]],
+    "the editor gets the type and the link back",
+  );
+
+  await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token });
+  const timeline = async () => (await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.itinerary[0].activities;
+  let shown = await timeline();
+  assert.deepEqual(shown.map((a: { type: string }) => a.type), ["TRANSFER", "ACTIVITY", "ACTIVITY", "OTHER"]);
+  assert.equal(shown[0].activity, null, "an unlinked step has no catalogue activity");
+  assert.deepEqual(
+    { ...shown[1].activity, image: shown[1].activity.image?.url ? "image" : null },
+    { slug: safari.slug, name: "Desert Safari", description: "Dune drive, camel ride and a barbecue dinner at a desert camp.", location: "Lahbab desert", image: "image" },
+  );
+  assert.deepEqual([shown[2].title, shown[2].description, shown[2].location], ["Sunset at the camp", "Our own words.", "Camp Al Khayma"], "the step keeps its own text");
+  assert.equal(shown[3].activity, null);
+
+  // Switched off in the catalogue: no longer shown; the step stays as written.
+  await api("PATCH", `/api/admin/activities/${safari.id}`, { token, body: { isActive: false } });
+  shown = await timeline();
+  assert.equal(shown[1].activity, null);
+  assert.equal(shown[1].title, "Dune drive");
+  // Deleted from the catalogue: the link is cleared, the step stays.
+  assert.equal((await api("DELETE", `/api/admin/activities/${safari.id}`, { token })).status, 200);
+  shown = await timeline();
+  assert.deepEqual(shown.map((a: { title: string; activity: unknown }) => [a.title, a.activity]), steps.map((step) => [step.title, null]));
+});
+
+test("hotel options: every field is optional; empty rows are dropped; a row without a hotel is kept but not published", async () => {
+  const pkg = await readyPackage(token, ids, { title: "Optional Hotels Trip" });
+  const hotel = (await api("POST", "/api/admin/hotels", { token, body: { name: "Rove Downtown", location: "Downtown Dubai", starCategory: 3 } })).body.data;
+  const put = (hotels: unknown[]) => api("PUT", `/api/admin/packages/${pkg.id}/hotels`, { token, body: { hotels } });
+  type Row = { hotelId: string | null; nights: number | null; roomType: string | null; mealPlan: string | null; isDefault: boolean };
+
+  const saved = await put([
+    { hotelId: hotel.id },
+    { hotelId: null, nights: null, roomType: "Deluxe room", mealPlan: null, isDefault: true },
+    { hotelId: null, nights: null, roomType: null, mealPlan: null },
+    { hotelId: hotel.id, nights: 2, roomType: "Suite", mealPlan: "Half board", isDefault: false },
+  ]);
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.deepEqual(
+    saved.body.data.hotels.map(({ hotelId, nights, roomType, mealPlan, isDefault }: Row) => ({ hotelId, nights, roomType, mealPlan, isDefault })),
+    [
+      { hotelId: hotel.id, nights: null, roomType: null, mealPlan: null, isDefault: true },
+      { hotelId: null, nights: null, roomType: "Deluxe room", mealPlan: null, isDefault: true },
+      { hotelId: hotel.id, nights: 2, roomType: "Suite", mealPlan: "Half board", isDefault: false },
+    ],
+    "the empty row is dropped; the others are kept as entered, for the admin to finish",
+  );
+  assert.equal(saved.body.data.hotels[1].hotel, null);
+
+  await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token });
+  const page = (await api("GET", `/api/public/packages/${pkg.slug}`)).body.data;
+  assert.deepEqual(
+    page.hotels.map((h: { name: string; nights: number | null; roomType: string | null; mealPlan: string | null; isDefault: boolean }) => [h.name, h.nights, h.roomType, h.mealPlan, h.isDefault]),
+    [["Rove Downtown", null, null, null, true], ["Rove Downtown", 2, "Suite", "Half board", false]],
+    "only rows with a hotel are published",
+  );
+
+  // A hotel switched off in the catalogue is not published; switched back on, it is.
+  await api("PATCH", `/api/admin/hotels/${hotel.id}`, { token, body: { isActive: false } });
+  assert.deepEqual((await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.hotels, []);
+  await api("PATCH", `/api/admin/hotels/${hotel.id}`, { token, body: { isActive: true } });
+  assert.equal((await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.hotels.length, 2);
+
+  // Values are still checked when given.
+  assert.equal((await put([{ hotelId: hotel.id, nights: 0 }])).body.error.details[0].message, "At least one night.");
+  assert.equal((await put([{ hotelId: crypto.randomUUID() }])).body.error.details[0].message, "A selected hotel no longer exists.");
+  assert.equal((await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.hotels.length, 2, "unchanged after refused saves");
+  assert.deepEqual((await put([])).body.data.hotels, []);
+  assert.deepEqual((await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.hotels, []);
+});
+
 test("pricing: adult, child and infant in INR and AED; negatives and unknown currencies refused", async () => {
   const pkg = await readyPackage(token, ids, { title: "Pricing Trip" });
   const editor = (await api("GET", `/api/admin/packages/${pkg.id}`, { token })).body.data;
@@ -221,6 +383,10 @@ test("listing: filters by branch, destination, duration, price range in a curren
   // Search ignores case and accents: "male" finds the Malé destination.
   assert.deepEqual(await slugs("q=MALE"), ["filter-maldives"]);
   assert.deepEqual(await slugs("q=honeymoon"), ["filter-maldives"]);
+  // The selling branch is not a search word: "dubai" (a branch here) must not find the Dubai branch's Georgia trip.
+  assert.equal((await slugs("q=dubai")).includes("filter-georgia"), false);
+  assert.equal((await slugs("q=calicut")).includes("filter-maldives"), false);
+  assert.ok((await slugs("q=mountains")).includes("filter-georgia"), "the category is still searchable");
   const search = await api("GET", "/api/public/search?q=georgia");
   assert.ok(search.body.data.packages.some((p: { slug: string }) => p.slug === "filter-georgia"));
   assert.ok(search.body.data.destinations.some((d: { slug: string }) => d.slug === "georgia"));
@@ -254,50 +420,71 @@ test("preview links show drafts to whoever holds the link, until they expire", a
   assert.equal((await api("GET", `/api/public/preview/packages/${pkg.id}?token=${encodeURIComponent(expired)}`)).status, 403);
 });
 
-test("good to know and important information: saved per package, shown on its page after the site-wide notes", async () => {
+test("good to know and important information: the shared content until the package saves its own lists, then exactly those", async () => {
   const pkg = await readyPackage(token, ids, { title: "Info Trip" });
+  const other = await readyPackage(token, ids, { title: "Info Trip Untouched" });
+  for (const p of [pkg, other]) await api("POST", `/api/admin/packages/${p.id}/publish`, { token });
   const editor = await signIn("EDITOR");
   const put = (section: string, items: unknown[], as = editor.token) => api("PUT", `/api/admin/packages/${pkg.id}/${section}`, { token: as, body: { items } });
-  const tips = [
-    { title: "Dress code", description: "Cover shoulders and knees when visiting mosques." },
-    { title: "Tipping is welcome but not expected", description: null },
+  const shown = async (slug = pkg.slug) => (await api("GET", `/api/public/packages/${slug}`)).body.data;
+  const editorView = async () => (await api("GET", `/api/admin/packages/${pkg.id}`, { token })).body.data;
+  const facts = [
+    { label: "Currency", value: "Georgian lari (GEL)" },
+    { label: "Visa", value: "Visa-free for many passports." },
   ];
-  const notes = ["Carry a printed copy of your hotel voucher.", "Desert safaris are not suitable during pregnancy."];
+  await api("PATCH", `/api/admin/destinations/${ids.destinationId}`, { token, body: { facts } });
+  const shared = (await api("GET", "/api/admin/content", { token })).body.data["package.defaults"];
+  const asItems = facts.map(({ label, value }) => ({ title: label, description: value }));
 
-  const savedTips = await put("good-to-know", tips);
-  assert.equal(savedTips.status, 200, JSON.stringify(savedTips.body));
-  assert.deepEqual(savedTips.body.data.goodToKnow.map(({ title, description }: { title: string; description: string | null }) => ({ title, description })), tips);
-  const savedNotes = await put("important-info", notes);
-  assert.equal(savedNotes.status, 200, JSON.stringify(savedNotes.body));
-  assert.deepEqual(savedNotes.body.data.importantInfo, notes);
+  // Before the package has its own lists: the page and the editor both show the shared content, once each.
+  let page = await shown();
+  assert.deepEqual(page.goodToKnow, asItems);
+  assert.deepEqual(page.importantInfo, shared.importantInfo);
+  assert.deepEqual(page.destination.facts, [], "the facts are not sent a second time");
+  let view = await editorView();
+  assert.equal(view.ownInfo, false);
+  assert.deepEqual([view.goodToKnow, view.importantInfo], [asItems, shared.importantInfo], "the admin starts from exactly what the page shows");
+
+  // Saving one list gives the package its own copy of both, exactly as saved.
+  const goodToKnow = [...asItems, { title: "Dress code", description: "Cover shoulders and knees in churches." }, { title: "Tipping is welcome but not expected", description: null }];
+  const saved = await put("good-to-know", goodToKnow);
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.data.ownInfo, true);
+  page = await shown();
+  assert.deepEqual(page.goodToKnow, goodToKnow);
+  assert.deepEqual(page.importantInfo, shared.importantInfo, "the other list is kept as it was shown");
+  const notes = [shared.importantInfo[0], "Carry a printed copy of your hotel voucher."];
+  assert.equal((await put("important-info", notes)).status, 200);
+  assert.deepEqual((await shown()).importantInfo, notes, "a shared note removed, a note added: exactly what was saved");
   for (const section of ["goodToKnow", "importantInfo"]) {
     assert.ok(await AuditLog.exists({ action: "PACKAGE_UPDATED", entityId: pkg.id, "metadata.section": section }), section);
   }
 
-  await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token });
-  const page = (await api("GET", `/api/public/packages/${pkg.slug}`)).body.data;
-  assert.deepEqual(page.goodToKnow, tips);
-  assert.deepEqual(page.importantInfo.slice(-2), notes, "the package's own notes come last");
-  assert.match(page.importantInfo[0], /passport/i, "the site-wide notes come first");
+  // Changing the shared content now only affects packages without their own lists.
+  await api("PATCH", `/api/admin/destinations/${ids.destinationId}`, { token, body: { facts: [facts[0]] } });
+  await api("PUT", "/api/admin/content/package.defaults", { token, body: { ...shared, importantInfo: ["Only this shared note."] } });
+  page = await shown();
+  assert.deepEqual([page.goodToKnow, page.importantInfo], [goodToKnow, notes], "this package keeps its own lists");
+  const untouched = await shown(other.slug);
+  assert.deepEqual([untouched.goodToKnow, untouched.importantInfo], [[asItems[0]], ["Only this shared note."]], "a package without its own lists follows the shared content");
+  await api("PUT", "/api/admin/content/package.defaults", { token, body: shared });
 
   // Checked like every other section; nothing is saved when a list is invalid.
   const blank = await put("good-to-know", [{ title: "  ", description: null }]);
   assert.equal(blank.body.error.details[0].path, "items.0.title");
   assert.equal(blank.body.error.details[0].message, "Text is required.");
-  assert.equal((await put("important-info", Array.from({ length: 21 }, (_, i) => `Note ${i + 1}`))).status, 400, "at most 20 notes");
+  assert.equal((await put("important-info", Array.from({ length: 41 }, (_, i) => `Note ${i + 1}`))).status, 400, "at most 40 notes");
   assert.equal((await put("important-info", ["x".repeat(301)])).status, 400, "at most 300 characters each");
   assert.equal((await put("important-info", notes, "")).status, 401);
-  assert.deepEqual((await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.goodToKnow, tips, "unchanged after the refused saves");
+  assert.deepEqual((await shown()).goodToKnow, goodToKnow, "unchanged after the refused saves");
 
-  // A copy keeps both lists; emptying them hides the package's own content, the site-wide notes stay.
-  const copy = await api("POST", `/api/admin/packages/${pkg.id}/duplicate`, { token });
-  assert.deepEqual(copy.body.data.importantInfo, notes);
-  assert.equal(copy.body.data.goodToKnow.length, 2);
+  // A copy keeps the package's own lists; emptied lists leave nothing to show (no shared content comes back).
+  const copy = (await api("POST", `/api/admin/packages/${pkg.id}/duplicate`, { token })).body.data;
+  assert.deepEqual([copy.ownInfo, copy.goodToKnow, copy.importantInfo], [true, goodToKnow, notes]);
   await put("good-to-know", []);
   await put("important-info", []);
-  const emptied = (await api("GET", `/api/public/packages/${pkg.slug}`)).body.data;
-  assert.deepEqual(emptied.goodToKnow, []);
-  assert.ok(emptied.importantInfo.length > 0 && !emptied.importantInfo.some((line: string) => notes.includes(line)));
+  page = await shown();
+  assert.deepEqual([page.goodToKnow, page.importantInfo], [[], []]);
 });
 
 test("editors can edit packages but not publish them", async () => {

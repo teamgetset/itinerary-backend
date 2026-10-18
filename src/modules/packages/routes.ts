@@ -150,7 +150,7 @@ export const packageAdminRoutes = new Hono<AppEnv>()
       return ok(c, await uploadItineraryPdf(idParam(c), form.file, c.get("admin"), pdfVersion(c.req.param("version"))));
     },
   )
-  /** Remove one version of the itinerary PDF (the one with the logo only while the package is not published). */
+  /** Remove one version of the itinerary PDF, also from a published package. */
   .delete("/:id/itinerary-pdf/:version?", requireRole("ADMIN"), async (c) =>
     ok(c, await removeItineraryPdf(idParam(c), c.get("admin"), pdfVersion(c.req.param("version")))),
   );

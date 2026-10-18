@@ -25,7 +25,8 @@ npm run dev                   # http://localhost:4000
 | `pg:dev`, `pg:status`, `pg:migrate`, `pg:verify`, `pg:generate` | LEGACY PostgreSQL tooling (`src/legacy-postgres/`), kept for the migration and rollback until sign-off |
 
 Itinerary PDFs are prepared outside GETSET and uploaded in the admin (PDF only, up to 4 MB), in two versions per
-package: with the GETSET logo (required to publish) and without it (optional). The API stores them privately
+package: with the GETSET logo and, optionally, without it. Publishing never waits for them: the publish checklist only
+flags what is missing. The API stores them privately
 (Cloudinary `raw/authenticated` under `CLOUDINARY_FOLDER`) and streams them at `GET /api/public/packages/<slug>/pdf`
 (`?branding=without-logo` for the other version); admin routes: `PUT`/`DELETE`/`GET
 /api/admin/packages/<id>/itinerary-pdf` (with logo) and `.../itinerary-pdf/without-logo`.

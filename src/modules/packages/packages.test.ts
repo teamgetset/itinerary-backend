@@ -258,23 +258,42 @@ test("pricing: adult, child and infant in INR and AED; negatives and unknown cur
   assert.equal(twice.status, 400);
 });
 
-test("publishing is blocked until the package is complete, with a checklist", async () => {
+test("publishing is allowed with an incomplete checklist; the checklist still says what is missing", async () => {
   const bare = await api("POST", "/api/admin/packages", {
     token,
     body: { branchId: ids.branchId, destinationId: ids.destinationId, title: "Incomplete", durationDays: 2, durationNights: 1 },
   });
-  const check = await api("GET", `/api/admin/packages/${bare.body.data.id}/publish-check`, { token });
+  const id = bare.body.data.id;
+  const check = await api("GET", `/api/admin/packages/${id}/publish-check`, { token });
   assert.equal(check.body.data.ready, false);
-  const failing = check.body.data.checklist.filter((i: { ok: boolean }) => !i.ok).map((i: { key: string }) => i.key);
-  assert.deepEqual(failing, ["heroImage", "description", "pricing", "itinerary", "itineraryPdf"]);
+  const failing = check.body.data.checklist.filter((i: { ok: boolean }) => !i.ok);
+  assert.deepEqual(failing.map((i: { key: string }) => i.key), ["heroImage", "description", "pricing", "itinerary", "itineraryPdf"]);
+  assert.match(failing.find((i: { key: string }) => i.key === "pricing").message, /Adult INR, Child INR, Infant INR, Adult AED, Child AED, Infant AED/);
 
-  const publish = await api("POST", `/api/admin/packages/${bare.body.data.id}/publish`, { token });
-  assert.equal(publish.status, 422);
-  assert.equal(publish.body.error.code, "PUBLISH_BLOCKED");
-  const pricing = publish.body.error.details.find((d: { path: string }) => d.path === "pricing");
-  assert.match(pricing.message, /Adult INR, Child INR, Infant INR, Adult AED, Child AED, Infant AED/);
-  const itinerary = publish.body.error.details.find((d: { path: string }) => d.path === "itinerary");
-  assert.equal(itinerary.message, "At least one itinerary day is required before publishing.");
+  // Publishing is not blocked; what was missing is recorded with it.
+  const publish = await api("POST", `/api/admin/packages/${id}/publish`, { token });
+  assert.equal(publish.status, 200, JSON.stringify(publish.body));
+  assert.equal(publish.body.data.status, "PUBLISHED");
+  const audited = await AuditLog.findOne({ action: "PACKAGE_PUBLISHED", entityId: id }).lean<{ metadata: { incomplete?: string[] } }>();
+  assert.deepEqual(audited?.metadata.incomplete, ["heroImage", "description", "pricing", "itinerary", "itineraryPdf"]);
+
+  // The public package works with what is there: no photo of its own, no prices, no days, no PDF.
+  const page = await api("GET", `/api/public/packages/${bare.body.data.slug}`);
+  assert.equal(page.status, 200);
+  assert.deepEqual([page.body.data.heroImage, page.body.data.startingPrice, page.body.data.itinerary, page.body.data.pdf], [null, {}, [], null]);
+  assert.ok((await api("GET", "/api/public/packages?pageSize=48")).body.data.some((p: { id: string }) => p.id === id), "listed with the others");
+
+  // A Super Admin may publish an incomplete package too; an Editor may not.
+  const second = await api("POST", "/api/admin/packages", {
+    token,
+    body: { branchId: ids.branchId, destinationId: ids.destinationId, title: "Incomplete Too", durationDays: 2, durationNights: 1 },
+  });
+  const editor = await signIn("EDITOR");
+  assert.equal((await api("POST", `/api/admin/packages/${second.body.data.id}/publish`, { token: editor.token })).status, 403);
+  const superAdmin = await signIn("SUPER_ADMIN");
+  const bySuperAdmin = await api("POST", `/api/admin/packages/${second.body.data.id}/publish`, { token: superAdmin.token });
+  assert.equal(bySuperAdmin.status, 200, JSON.stringify(bySuperAdmin.body));
+  assert.equal(bySuperAdmin.body.data.status, "PUBLISHED");
 });
 
 test("publish, unpublish, archive: public visibility follows status; the uploaded PDF is offered; actions audited", async () => {
@@ -303,20 +322,17 @@ test("publish, unpublish, archive: public visibility follows status; the uploade
   }
 });
 
-test("a live package cannot be edited into an incomplete state", async () => {
-  const pkg = await readyPackage(token, ids, { title: "Live Guard" });
+test("a live package can be edited freely, also leaving checklist items incomplete", async () => {
+  const pkg = await readyPackage(token, ids, { title: "Live Edits" });
   await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token });
-  const noHero = await api("PATCH", `/api/admin/packages/${pkg.id}`, { token, body: { heroImageId: null } });
-  assert.equal(noHero.status, 422);
-  assert.equal(noHero.body.error.code, "PUBLISHED_INCOMPLETE");
-  const noDays = await api("PUT", `/api/admin/packages/${pkg.id}/itinerary`, { token, body: { days: [] } });
-  assert.equal(noDays.body.error.details[0].path, "itinerary");
-  // Nothing was changed by the refused edits.
+  assert.equal((await api("PATCH", `/api/admin/packages/${pkg.id}`, { token, body: { heroImageId: null } })).status, 200);
+  assert.equal((await api("PUT", `/api/admin/packages/${pkg.id}/itinerary`, { token, body: { days: [] } })).status, 200);
+  assert.equal((await api("PUT", `/api/admin/packages/${pkg.id}/prices`, { token, body: { prices: [] } })).status, 200);
   const detail = await api("GET", `/api/public/packages/${pkg.slug}`);
-  assert.ok(detail.body.data.heroImage);
-  assert.equal(detail.body.data.itinerary.length, 3);
-  // Ordinary edits still work.
-  assert.equal((await api("PATCH", `/api/admin/packages/${pkg.id}`, { token, body: { bestTime: "All year" } })).status, 200);
+  assert.equal(detail.status, 200, "still live");
+  assert.deepEqual([detail.body.data.heroImage, detail.body.data.itinerary, detail.body.data.startingPrice], [null, [], {}]);
+  const check = (await api("GET", `/api/admin/packages/${pkg.id}/publish-check`, { token })).body.data;
+  assert.deepEqual(check.checklist.filter((i: { ok: boolean }) => !i.ok).map((i: { key: string }) => i.key), ["heroImage", "pricing", "itinerary"], "the checklist still reports them");
 });
 
 test("delete: refused while published; soft delete frees the slug", async () => {

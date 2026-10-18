@@ -276,7 +276,7 @@ export interface PackageDoc extends Seo, Timestamps {
   arrivalAirportCode: string | null;
   arrivalCity: string | null;
   heroImageId: string | null;
-  /** The uploaded itinerary PDF with the GETSET logo (a DOCUMENT media record); required to publish. */
+  /** The uploaded itinerary PDF with the GETSET logo (a DOCUMENT media record); the main download, optional. */
   itineraryPdfId: string | null;
   /** The same itinerary without the logo; optional. Missing on packages saved before it existed. */
   itineraryPdfWithoutLogoId?: string | null;

@@ -75,25 +75,6 @@ async function afterChange(pkg: Pick<PackageRow, "id" | "status">) {
   if (pkg.status === "PUBLISHED") revalidate("catalog");
 }
 
-/**
- * Published packages may not be incomplete: an edit to a live package that would fail the publish
- * checklist is rolled back. (Unpublish first to rework it.) Runs inside the edit's transaction, so it sees the edit.
- */
-async function assertStillPublishable(id: string) {
-  const graph = await loadPackageGraph({ _id: id });
-  // The itinerary PDF is checked when publishing, and a live package's PDF cannot be removed (only replaced). Packages
-  // published before PDFs were uploaded may still lack one; that must not block their other edits.
-  const failed = graph ? (await publishChecklist(graph)).filter((item) => !item.ok && item.key !== "itineraryPdf") : [];
-  if (failed.length) {
-    throw new AppError(
-      422,
-      "PUBLISHED_INCOMPLETE",
-      "This change would leave the live package incomplete. Complete it, or unpublish the package first.",
-      failed.map((item) => ({ path: item.key, message: item.message ?? `${item.label} is incomplete.` })),
-    );
-  }
-}
-
 /** Marks the package as edited (updatedAt, updatedById) when only a section changed. */
 const touch = (id: string, admin: AdminContext) => Package.updateOne({ _id: id }, { $set: { updatedById: admin.id } });
 
@@ -272,7 +253,6 @@ export async function updatePackage(id: string, input: z.infer<typeof updatePack
   await assertReferences(input);
   await transaction(async () => {
     await Package.updateOne({ _id: id }, { $set: { ...defined(input), updatedById: admin.id } });
-    if (existing.status === "PUBLISHED") await assertStillPublishable(id);
     await refreshSearchText({ _id: id });
     await audit(admin, "PACKAGE_UPDATED", "package", id, { section: "details", fields: Object.keys(input) });
   });
@@ -285,7 +265,6 @@ async function replaceSection(id: string, admin: AdminContext, section: string, 
   const existing = await findPackage(id);
   await transaction(async () => {
     await write();
-    if (existing.status === "PUBLISHED") await assertStillPublishable(id);
     await touch(id, admin);
     await audit(admin, "PACKAGE_UPDATED", "package", id, { section });
   });
@@ -411,7 +390,7 @@ export interface ChecklistItem {
 
 const PRICE_LABEL = { ADULT: "Adult", CHILD: "Child", INFANT: "Infant" } as const;
 
-/** Drafts may be incomplete; published packages may not. Every item must pass before publishing. */
+/** What the admin is shown as done or still missing. Guidance only: publishing never requires it (see publishPackage). */
 export async function publishChecklist(graph: PackageGraph): Promise<ChecklistItem[]> {
   const active = await activeCurrencies();
   const missingPrices = active.flatMap((currency) =>
@@ -439,28 +418,32 @@ export async function publishChecklist(graph: PackageGraph): Promise<ChecklistIt
       ok: days > 0 && days <= graph.durationDays,
       message:
         days === 0
-          ? "At least one itinerary day is required before publishing."
+          ? "Add at least one itinerary day."
           : days > graph.durationDays
             ? `The itinerary has ${days} days but the package lasts ${graph.durationDays}.`
             : undefined,
     },
-    // Only the version with the logo is required; the one without it is optional.
+    // Only the version with the logo is listed; the one without it is an extra choice for customers.
     { key: "itineraryPdf", label: "Itinerary PDF with logo", ok: !!graph.itineraryPdfId, message: graph.itineraryPdfId ? undefined : "Upload the itinerary PDF with the logo." },
   ];
 }
 
+/**
+ * Publishes the package whatever its checklist says: the checklist is guidance for the admin, not a gate. Items still
+ * incomplete are recorded with the publication, and the website shows only the parts that are filled in.
+ */
 export async function publishPackage(id: string, admin: AdminContext) {
   const graph = await loadEditorGraph(id);
-  const checklist = await publishChecklist(graph);
-  const failed = checklist.filter((item) => !item.ok);
-  if (failed.length) {
-    throw new AppError(422, "PUBLISH_BLOCKED", "This package is not ready to publish", failed.map((item) => ({ path: item.key, message: item.message ?? `${item.label} is incomplete.` })));
-  }
+  const incomplete = (await publishChecklist(graph)).filter((item) => !item.ok).map((item) => item.key);
   await transaction(async () => {
     await Package.updateOne({ _id: id }, { $set: { status: "PUBLISHED", publishedAt: graph.publishedAt ?? new Date(), updatedById: admin.id } });
-    await audit(admin, "PACKAGE_PUBLISHED", "package", id, { itineraryPdfId: graph.itineraryPdfId, itineraryPdfWithoutLogoId: graph.itineraryPdfWithoutLogoId ?? null });
+    await audit(admin, "PACKAGE_PUBLISHED", "package", id, {
+      itineraryPdfId: graph.itineraryPdfId,
+      itineraryPdfWithoutLogoId: graph.itineraryPdfWithoutLogoId ?? null,
+      ...(incomplete.length && { incomplete }),
+    });
   });
-  log.info("package.published", { packageId: id, adminUserId: admin.id });
+  log.info("package.published", { packageId: id, adminUserId: admin.id, ...(incomplete.length && { incomplete }) });
   revalidate("catalog");
 }
 

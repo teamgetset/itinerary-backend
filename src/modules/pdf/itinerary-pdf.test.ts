@@ -265,7 +265,7 @@ test("replacing: if the old record cannot be deleted after its file was, the rep
     assert.equal(failure?.fileDeleted, true);
   }));
 
-test("removing: admins only; the file and record are deleted; a live package keeps its PDF", async () => {
+test("removing: admins only; the file and record are deleted, also from a live package", async () => {
   const pkg = await draft(true);
   const mediaId = (await pkgDoc(pkg.id)).itineraryPdfId!;
   const key = (await mediaDoc(mediaId))!.storageKey;
@@ -273,19 +273,17 @@ test("removing: admins only; the file and record are deleted; a live package kee
   assert.equal((await api("DELETE", `/api/admin/packages/${pkg.id}/itinerary-pdf`)).status, 401);
 
   await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token: admin.token });
-  const live = await api("DELETE", `/api/admin/packages/${pkg.id}/itinerary-pdf`, { token: admin.token });
-  assert.equal(live.status, 409);
-  assert.equal(live.body.error.code, "PDF_REQUIRED");
-  await api("POST", `/api/admin/packages/${pkg.id}/unpublish`, { token: admin.token });
-
   const removed = await api("DELETE", `/api/admin/packages/${pkg.id}/itinerary-pdf`, { token: admin.token });
-  assert.equal(removed.status, 200);
+  assert.equal(removed.status, 200, "allowed while live: the PDF is not required");
   assert.deepEqual(removed.body.data, { removed: true, fileDeleted: true });
   assert.equal((await pkgDoc(pkg.id)).itineraryPdfId, null);
   assert.equal(await mediaDoc(mediaId), null);
   assert.equal(await storage.get(key), null);
   assert.ok(await AuditLog.exists({ action: "ITINERARY_PDF_REMOVED", entityId: pkg.id }));
   assert.equal((await api("DELETE", `/api/admin/packages/${pkg.id}/itinerary-pdf`, { token: admin.token })).status, 404, "nothing left to remove");
+  const page = (await api("GET", `/api/public/packages/${pkg.slug}`)).body.data;
+  assert.equal(page.pdf, null, "still live, with no PDF to offer");
+  assert.equal((await download(pkg.slug)).body.error.code, "PDF_NOT_AVAILABLE");
 });
 
 test("removing: if the file cannot be deleted, the response says so instead of claiming success", () =>
@@ -382,7 +380,7 @@ test("the version without the logo is optional: publish without it, add, replace
   assert.equal((await download(pkg.slug)).status, 200, "the version with the logo is still downloadable");
 
   const live = await api("DELETE", `/api/admin/packages/${pkg.id}/itinerary-pdf/with-logo`, { token: admin.token });
-  assert.equal(live.body.error.code, "PDF_REQUIRED", "the version with the logo still cannot be removed while live");
+  assert.equal(live.status, 200, "the version with the logo can be removed while live too");
 });
 
 test("the media library cannot archive a package's PDF; other files are archived as before", async () => {
@@ -444,18 +442,15 @@ test("no PDF: the page still works (pdf: null) and the download answers 'not ava
   assert.equal((await download(withFile.slug)).body.error.code, "PDF_NOT_AVAILABLE");
 });
 
-test("publishing needs the PDF; once uploaded it is allowed", async () => {
+test("publishing does not need the PDF: the checklist flags it, the page then offers none", async () => {
   const pkg = await draft();
-  const blocked = await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token: admin.token });
-  assert.equal(blocked.status, 422);
-  assert.equal(blocked.body.error.code, "PUBLISH_BLOCKED");
-  assert.deepEqual(blocked.body.error.details, [{ path: "itineraryPdf", message: "Upload the itinerary PDF with the logo." }]);
-  assert.equal((await pkgDoc(pkg.id)).status, "DRAFT");
-
-  await uploadPdf(admin.token, pkg.id);
+  const check = (await api("GET", `/api/admin/packages/${pkg.id}/publish-check`, { token: admin.token })).body.data;
+  assert.deepEqual(check.checklist.filter((i: { ok: boolean }) => !i.ok).map((i: { key: string; message: string }) => [i.key, i.message]), [["itineraryPdf", "Upload the itinerary PDF with the logo."]]);
   const published = await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token: admin.token });
   assert.equal(published.status, 200, JSON.stringify(published.body));
   assert.equal((await pkgDoc(pkg.id)).status, "PUBLISHED");
+  assert.equal((await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.pdf, null);
+  assert.equal((await download(pkg.slug)).body.error.code, "PDF_NOT_AVAILABLE");
 });
 
 test("a duplicate starts without PDFs (each package owns its files)", async () => {

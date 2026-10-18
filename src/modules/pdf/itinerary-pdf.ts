@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { transaction } from "../../db/client.ts";
 import { AdminUser, Media, Package, type AdminUserDoc, type MediaDoc, type PackageDoc } from "../../db/models.ts";
-import { AppError, conflict, notFound } from "../../lib/errors.ts";
+import { AppError, notFound } from "../../lib/errors.ts";
 import type { AdminContext } from "../../lib/http.ts";
 import { log } from "../../lib/logger.ts";
 import { audit } from "../audit.ts";
@@ -11,7 +11,7 @@ import { safeFileName } from "../storage.ts";
 
 /*
  * Itinerary PDFs are prepared outside GETSET and uploaded by an admin, in two versions per package: with the GETSET
- * logo (required to publish) and without it (optional). They are stored privately (Cloudinary raw/authenticated, or
+ * logo (the main download) and without it; neither is needed to publish. They are stored privately (Cloudinary raw/authenticated, or
  * local disk) and only ever streamed by the API.
  *
  * The package never points at a missing file: a new upload is stored and verified, then recorded and switched to in one
@@ -155,10 +155,7 @@ export async function uploadItineraryPdf(packageId: string, file: File, admin: A
   };
 }
 
-/**
- * Removes one version of a package's PDF. A published package must keep the version with the logo (replace it
- * instead); the version without it can always be removed.
- */
+/** Removes one version of a package's PDF; either version, also from a published package (its page then offers none). */
 export async function removeItineraryPdf(packageId: string, admin: AdminContext, version: PdfVersion = "with-logo") {
   const field = PDF_VERSIONS[version];
   const { mediaId, published } = await transaction(async () => {
@@ -166,9 +163,6 @@ export async function removeItineraryPdf(packageId: string, admin: AdminContext,
     if (!pkg) throw notFound("Package");
     const current = pkg[field];
     if (!current) throw notFound("Itinerary PDF");
-    if (version === "with-logo" && pkg.status === "PUBLISHED") {
-      throw conflict("PDF_REQUIRED", "A published package needs its itinerary PDF with the logo. Upload a replacement, or unpublish the package first.");
-    }
     await Package.updateOne({ _id: packageId }, { $set: { [field]: null, updatedById: admin.id } });
     await Media.updateOne({ _id: current }, { $set: { deletedAt: new Date() } });
     await audit(admin, "ITINERARY_PDF_REMOVED", "package", packageId, { version, mediaId: current });

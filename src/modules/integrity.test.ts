@@ -132,15 +132,17 @@ test("price sorting puts packages without a price in the chosen currency last", 
   assert.ok(inRange.includes(priced.slug) && !inRange.includes(unpriced.slug));
 });
 
-test("a refused edit is rolled back completely, audit entry included (transactions)", async () => {
+test("a failed edit is rolled back completely, audit entry included (transactions)", async (t) => {
   const pkg = await readyPackage(token, ids, { title: "Live and complete" });
   await Package.updateOne({ _id: pkg.id }, { $set: { status: "PUBLISHED", publishedAt: new Date() } });
   const audited = () => AuditLog.countDocuments({ entityId: pkg.id, action: "PACKAGE_UPDATED" });
   const before = await audited();
 
-  const refused = await api("PUT", `/api/admin/packages/${pkg.id}/itinerary`, { token, body: { days: [] } });
-  assert.equal(refused.status, 422);
-  assert.equal(refused.body.error.code, "PUBLISHED_INCOMPLETE");
+  // The audit entry is an edit's last write: failing it, after the itinerary was replaced, must undo the whole edit.
+  t.mock.method(AuditLog, "create", () => Promise.reject(new Error("fake database failure")));
+  const failed = await api("PUT", `/api/admin/packages/${pkg.id}/itinerary`, { token, body: { days: [] } });
+  t.mock.restoreAll();
+  assert.equal(failed.status, 500);
   assert.equal((await api("GET", `/api/admin/packages/${pkg.id}`, { token })).body.data.itinerary.length, 3);
   assert.equal(await audited(), before);
 });

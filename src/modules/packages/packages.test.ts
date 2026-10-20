@@ -335,13 +335,25 @@ test("a live package can be edited freely, also leaving checklist items incomple
   assert.deepEqual(check.checklist.filter((i: { ok: boolean }) => !i.ok).map((i: { key: string }) => i.key), ["heroImage", "pricing", "itinerary"], "the checklist still reports them");
 });
 
-test("delete: refused while published; soft delete frees the slug", async () => {
+test("delete: published and draft packages alike; gone from the admin and the website; soft delete frees the slug", async () => {
   const pkg = await readyPackage(token, ids, { title: "Delete Me" });
   await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token });
-  assert.equal((await api("DELETE", `/api/admin/packages/${pkg.id}`, { token })).body.error.code, "PACKAGE_PUBLISHED");
-  await api("POST", `/api/admin/packages/${pkg.id}/unpublish`, { token });
-  assert.equal((await api("DELETE", `/api/admin/packages/${pkg.id}`, { token })).status, 200);
+  assert.equal((await api("GET", `/api/public/packages/${pkg.slug}`)).status, 200);
+
+  const deleted = await api("DELETE", `/api/admin/packages/${pkg.id}`, { token });
+  assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
   assert.equal((await api("GET", `/api/admin/packages/${pkg.id}`, { token })).status, 404);
+  assert.ok(!(await api("GET", "/api/admin/packages?pageSize=100", { token })).body.data.some((p: { id: string }) => p.id === pkg.id), "not in the admin list");
+  assert.equal((await api("GET", `/api/public/packages/${pkg.slug}`)).status, 404);
+  assert.equal((await api("GET", `/api/public/packages/${pkg.slug}/pdf`)).status, 404);
+  assert.ok(!(await api("GET", "/api/public/packages?pageSize=48")).body.data.some((p: { id: string }) => p.id === pkg.id), "not listed on the website");
+  const audited = await AuditLog.findOne({ action: "PACKAGE_DELETED", entityId: pkg.id }).lean<{ metadata: { slug: string; from: string } }>();
+  assert.deepEqual(audited?.metadata, { slug: "delete-me", from: "PUBLISHED" });
+
+  const draft = await readyPackage(token, ids, { title: "Delete Me Draft" });
+  assert.equal((await api("DELETE", `/api/admin/packages/${draft.id}`, { token })).status, 200);
+  assert.equal((await api("GET", `/api/admin/packages/${draft.id}`, { token })).status, 404);
+
   const again = await readyPackage(token, ids, { title: "Delete Me" });
   assert.equal(again.slug, "delete-me");
 });

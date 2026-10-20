@@ -18,7 +18,7 @@ import {
   type MediaDoc,
   type PackageDoc,
 } from "../../db/models.ts";
-import { AppError, conflict, invalidReference, notFound } from "../../lib/errors.ts";
+import { AppError, invalidReference, notFound } from "../../lib/errors.ts";
 import { pageMeta, type AdminContext } from "../../lib/http.ts";
 import { log } from "../../lib/logger.ts";
 import { contains } from "../../lib/text.ts";
@@ -458,17 +458,20 @@ export async function setPackageStatus(id: string, status: "DRAFT" | "ARCHIVED",
   if (existing.status === "PUBLISHED") revalidate("catalog");
 }
 
-/** Soft delete. The slug is released so it can be reused; history (enquiries, audit) keeps pointing at the document. */
+/**
+ * Soft delete, whatever the status: the package leaves the admin and the website. The slug is released so it can be
+ * reused; history (enquiries, audit) keeps pointing at the document.
+ */
 export async function deletePackage(id: string, admin: AdminContext) {
   const existing = await findPackage(id);
-  if (existing.status === "PUBLISHED") throw conflict("PACKAGE_PUBLISHED", "Unpublish or archive the package before deleting it.");
   await transaction(async () => {
     await Package.updateOne(
       { _id: id },
       { $set: { deletedAt: new Date(), slug: `${existing.slug}-deleted-${Date.now().toString(36)}`, updatedById: admin.id } },
     );
-    await audit(admin, "PACKAGE_DELETED", "package", id, { slug: existing.slug });
+    await audit(admin, "PACKAGE_DELETED", "package", id, { slug: existing.slug, from: existing.status });
   });
+  if (existing.status === "PUBLISHED") revalidate("catalog");
 }
 
 /** A new draft with the same content, so a similar trip can start from an existing one. */

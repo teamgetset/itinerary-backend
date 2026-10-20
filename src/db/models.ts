@@ -178,6 +178,8 @@ export interface DestinationDoc extends Seo, Timestamps {
   facts: Fact[];
   displayOrder: number;
   isActive: boolean;
+  /** Soft delete: gone from the admin and the website; deleted packages and enquiries keep pointing at it. */
+  deletedAt: Date | null;
 }
 
 export interface CategoryDoc extends Timestamps {
@@ -561,6 +563,7 @@ const destinationSchema = new Schema<DestinationDoc>(
     facts: { type: [factSchema], default: [] },
     displayOrder,
     isActive: flag(true),
+    deletedAt: nullableDate,
     ...seo,
   },
   options("destinations"),

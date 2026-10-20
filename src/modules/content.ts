@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { env } from "../config/env.ts";
 import { SiteContent, type SiteContentDoc } from "../db/models.ts";
 import { notFound } from "../lib/errors.ts";
-import { ok, readBody, type AppEnv } from "../lib/http.ts";
+import { ok, readBody, type AdminContext, type AppEnv } from "../lib/http.ts";
 import { requireRole } from "./auth/middleware.ts";
 import { audit } from "./audit.ts";
 import { safeHref } from "./crud.ts";
@@ -124,6 +125,60 @@ export async function getContentBlock<K extends ContentKey>(key: K): Promise<Con
   const row = await SiteContent.findById(key).lean<SiteContentDoc>();
   const parsed = row ? CONTENT_SCHEMAS[key].safeParse(row.value) : null;
   return (parsed?.success ? parsed.data : CONTENT_DEFAULTS[key]) as Content[K];
+}
+
+// ---------------------------------------------------------------------------------------------
+// Links to a page that is going away (a deleted destination)
+
+const siteHost = (host: string) => host.replace(/^www\./, "");
+
+/** Whether a content link opens `path` on this site: relative ("/destinations/georgia") or absolute to the site. */
+function linksTo(href: string, path: string) {
+  let url: URL;
+  try {
+    url = new URL(href, env.FRONTEND_URL);
+  } catch {
+    return false;
+  }
+  return siteHost(url.host) === siteHost(new URL(env.FRONTEND_URL).host) && url.pathname.replace(/\/+$/, "") === path;
+}
+
+/** The menu links and homepage buttons that open `path`, for the deletion warning. */
+export async function contentLinksTo(path: string) {
+  const { navigation, "home.hero": hero } = await getContent();
+  return [
+    ...navigation.header.filter((l) => linksTo(l.href, path)).map((l) => `Header menu: ${l.label}`),
+    ...navigation.footer.filter((l) => linksTo(l.href, path)).map((l) => `Footer menu: ${l.label}`),
+    ...[hero.primaryCta, hero.secondaryCta].filter((l) => l && linksTo(l.href, path)).map((l) => `Homepage button: ${l!.label}`),
+  ];
+}
+
+/**
+ * Takes links to `path` out of the site content, so nothing on the website leads to a removed page: menu links are
+ * dropped, the second homepage button is removed and the first one (required) goes back to its default.
+ * Runs inside the caller's transaction.
+ */
+export async function removeContentLinksTo(path: string, admin: AdminContext) {
+  const { navigation, "home.hero": hero } = await getContent();
+  const changes: [ContentKey, unknown][] = [];
+  const header = navigation.header.filter((l) => !linksTo(l.href, path));
+  const footer = navigation.footer.filter((l) => !linksTo(l.href, path));
+  if (header.length !== navigation.header.length || footer.length !== navigation.footer.length) changes.push(["navigation", { header, footer }]);
+  if (linksTo(hero.primaryCta.href, path) || (hero.secondaryCta && linksTo(hero.secondaryCta.href, path))) {
+    changes.push([
+      "home.hero",
+      {
+        ...hero,
+        primaryCta: linksTo(hero.primaryCta.href, path) ? CONTENT_DEFAULTS["home.hero"].primaryCta : hero.primaryCta,
+        secondaryCta: hero.secondaryCta && linksTo(hero.secondaryCta.href, path) ? null : hero.secondaryCta,
+      },
+    ]);
+  }
+  for (const [key, value] of changes) {
+    await SiteContent.updateOne({ _id: key }, { $set: { value, updatedById: admin.id } }, { upsert: true });
+    await audit(admin, "CONTENT_UPDATED", "site_content", key, { removedLinksTo: path });
+  }
+  if (changes.length) revalidate("content");
 }
 
 export const contentAdminRoutes = new Hono<AppEnv>()

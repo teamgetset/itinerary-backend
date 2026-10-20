@@ -4,7 +4,7 @@ import { z } from "zod";
 import { transaction } from "../db/client.ts";
 import { defined, withId } from "../db/models.ts";
 import { inUse, invalidReference, notFound } from "../lib/errors.ts";
-import { idParam, ok, pageMeta, pageQuery, readBody, readQuery, type AdminRole, type AppEnv } from "../lib/http.ts";
+import { idParam, ok, pageMeta, pageQuery, readBody, readQuery, type AdminContext, type AdminRole, type AppEnv } from "../lib/http.ts";
 import { contains } from "../lib/text.ts";
 import { requireRole } from "./auth/middleware.ts";
 import { audit } from "./audit.ts";
@@ -38,8 +38,8 @@ export interface CrudConfig<Create extends z.ZodType, Update extends z.ZodType> 
   refs?: Record<string, Model<any>>;
   /** True while other documents point at this one: DELETE answers 409 IN_USE (what ON DELETE RESTRICT did). */
   inUse?: (id: string) => Promise<boolean>;
-  /** Clears links to a deleted document (what ON DELETE SET NULL did). Runs inside the delete's transaction. */
-  onDelete?: (id: string) => Promise<void>;
+  /** Clears links to a deleted document (what ON DELETE SET NULL did). Runs inside the delete's transaction, soft or not. */
+  onDelete?: (id: string, admin: AdminContext) => Promise<void>;
   tags: CacheTag[];
   roles?: { write?: AdminRole; delete?: AdminRole };
   /** Adds PUT /order to save a drag-and-drop order into displayOrder. */
@@ -133,9 +133,10 @@ export function crudRoutes<Create extends z.ZodType, Update extends z.ZodType>(c
       await transaction(async () => {
         if (config.softDelete) {
           await model.updateOne({ _id: id }, { $set: { deletedAt: new Date() } });
+          await config.onDelete?.(id, admin);
         } else {
           if (await config.inUse?.(id)) throw inUse();
-          await config.onDelete?.(id);
+          await config.onDelete?.(id, admin);
           await model.deleteOne({ _id: id });
         }
         await audit(admin, `${ACTION}_DELETED`, entity, id);

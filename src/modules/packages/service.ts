@@ -44,6 +44,7 @@ import type {
 import { getContentBlock } from "../content.ts";
 import { PRICE_TYPES, loadPackageGraph, packageInfo, priceTable, type PackageGraph } from "./read.ts";
 import { refreshSearchText } from "./search-text.ts";
+import { markPackageDeleted } from "./delete.ts";
 
 type PackageRow = Omit<PackageDoc, "_id"> & { id: string };
 const notDeleted = { deletedAt: null };
@@ -60,7 +61,7 @@ const fieldError = (path: string, message: string) => new AppError(400, "VALIDAT
 async function assertReferences(input: { branchId?: string; destinationId?: string; categoryId?: string | null; heroImageId?: string | null; ogImageId?: string | null }) {
   const checks: [string | null | undefined, () => Promise<unknown>, string, string][] = [
     [input.branchId, () => Branch.exists({ _id: input.branchId }), "branchId", "Choose a branch."],
-    [input.destinationId, () => Destination.exists({ _id: input.destinationId }), "destinationId", "Choose a destination."],
+    [input.destinationId, () => Destination.exists({ _id: input.destinationId, deletedAt: null }), "destinationId", "Choose a destination."],
     [input.categoryId, () => Category.exists({ _id: input.categoryId }), "categoryId", "That category no longer exists."],
     [input.heroImageId, () => Media.exists({ _id: input.heroImageId, kind: "IMAGE" }), "heroImageId", "Choose an image from the media library."],
   ];
@@ -464,13 +465,7 @@ export async function setPackageStatus(id: string, status: "DRAFT" | "ARCHIVED",
  */
 export async function deletePackage(id: string, admin: AdminContext) {
   const existing = await findPackage(id);
-  await transaction(async () => {
-    await Package.updateOne(
-      { _id: id },
-      { $set: { deletedAt: new Date(), slug: `${existing.slug}-deleted-${Date.now().toString(36)}`, updatedById: admin.id } },
-    );
-    await audit(admin, "PACKAGE_DELETED", "package", id, { slug: existing.slug, from: existing.status });
-  });
+  await transaction(() => markPackageDeleted(existing, admin));
   if (existing.status === "PUBLISHED") revalidate("catalog");
 }
 

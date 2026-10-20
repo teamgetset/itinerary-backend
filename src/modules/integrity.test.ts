@@ -35,7 +35,7 @@ test("links to records that do not exist are refused (INVALID_REFERENCE)", async
   assert.equal(activity.body.error.code, "INVALID_REFERENCE");
 });
 
-test("records still in use cannot be deleted (IN_USE); links to deleted ones are cleared", async () => {
+test("hotels and activities still in use cannot be deleted (IN_USE); links to deleted ones are cleared", async () => {
   const category = (await api("POST", "/api/admin/categories", { token, body: { name: "Short breaks" } })).body.data;
   const pkg = await readyPackage(token, ids, { categoryId: category.id });
   const hotel = (await api("POST", "/api/admin/hotels", { token, body: { name: "Rooms Kazbegi", location: "Stepantsminda" } })).body.data;
@@ -49,7 +49,7 @@ test("records still in use cannot be deleted (IN_USE); links to deleted ones are
     body: { days: [{ title: "Tbilisi", hotelId: dayHotel.id, activities: [{ title: "Tasting", activityId: mentioned.id }] }] },
   });
 
-  for (const path of [`/api/admin/hotels/${hotel.id}`, `/api/admin/activities/${offered.id}`, `/api/admin/destinations/${ids.destinationId}`]) {
+  for (const path of [`/api/admin/hotels/${hotel.id}`, `/api/admin/activities/${offered.id}`]) {
     const removed = await api("DELETE", path, { token });
     assert.equal(removed.status, 409, path);
     assert.equal(removed.body.error.code, "IN_USE");
@@ -65,12 +65,59 @@ test("records still in use cannot be deleted (IN_USE); links to deleted ones are
   assert.equal(editor.itinerary[0].activities[0].title, "Tasting");
   assert.equal(editor.categoryId, null);
 
-  // A destination without packages can be deleted; its add-on activities stay, unlinked.
-  const empty = (await api("POST", "/api/admin/destinations", { token, body: { name: "Batumi", countryCode: "GE", countryName: "Georgia" } })).body.data;
-  const addOn = (await api("POST", "/api/admin/activities", { token, body: { name: "Botanical garden", destinationId: empty.id } })).body.data;
-  assert.equal((await api("DELETE", `/api/admin/destinations/${empty.id}`, { token })).status, 200);
-  assert.equal((await api("GET", `/api/admin/activities/${addOn.id}`, { token })).body.data.destinationId, null);
   // After all of that, every reference in the database still points at an existing document.
+  assert.deepEqual(await danglingReferences(), []);
+});
+
+test("deleting a destination takes its packages along, unlinks its activities and removes links to its page", async () => {
+  const destination = (await api("POST", "/api/admin/destinations", { token, body: { name: "Batumi", countryCode: "GE", countryName: "Georgia" } })).body.data;
+  const live = await readyPackage(token, ids, { title: "Batumi Beaches", destinationId: destination.id });
+  await api("POST", `/api/admin/packages/${live.id}/publish`, { token });
+  const draft = await readyPackage(token, ids, { title: "Batumi Draft", destinationId: destination.id });
+  const earlier = await readyPackage(token, ids, { title: "Batumi Old", destinationId: destination.id });
+  await api("DELETE", `/api/admin/packages/${earlier.id}`, { token });
+  const elsewhere = await readyPackage(token, ids, { title: "Somewhere Else" });
+  const addOn = (await api("POST", "/api/admin/activities", { token, body: { name: "Botanical garden", destinationId: destination.id } })).body.data;
+  const content = (await api("GET", "/api/admin/content", { token })).body.data;
+  const nav = content.navigation;
+  await api("PUT", "/api/admin/content/navigation", {
+    token,
+    body: { header: [...nav.header, { label: "Batumi", href: "/destinations/batumi" }], footer: [...nav.footer, { label: "Batumi", href: "http://www.site.test/destinations/batumi/?from=footer" }] },
+  });
+  const hero = { ...content["home.hero"], primaryCta: { label: "Batumi deals", href: "/destinations/batumi" }, secondaryCta: { label: "Other", href: "/destinations/batumi-old" } };
+  await api("PUT", "/api/admin/content/home.hero", { token, body: hero });
+
+  // The admin is told first what else the deletion changes.
+  const check = await api("GET", `/api/admin/destinations/${destination.id}/delete-check`, { token });
+  assert.deepEqual(
+    check.body.data.effects.map((effect: { items: string[] }) => effect.items),
+    [["Batumi Beaches (published)", "Batumi Draft (draft)"], ["Botanical garden"], ["Header menu: Batumi", "Footer menu: Batumi", "Homepage button: Batumi deals"]],
+  );
+
+  assert.equal((await api("DELETE", `/api/admin/destinations/${destination.id}`, { token })).status, 200);
+  // Gone from the admin and the website, with its packages; the other destination's package stays.
+  assert.equal((await api("GET", `/api/admin/destinations/${destination.id}`, { token })).status, 404);
+  assert.ok(!(await api("GET", "/api/admin/destinations?pageSize=100", { token })).body.data.some((d: { id: string }) => d.id === destination.id));
+  assert.equal((await api("GET", "/api/public/destinations/batumi")).status, 404);
+  assert.ok(!(await api("GET", "/api/public/destinations")).body.data.some((d: { slug: string }) => d.slug.startsWith("batumi")));
+  for (const pkg of [live, draft]) assert.equal((await api("GET", `/api/admin/packages/${pkg.id}`, { token })).status, 404);
+  assert.equal((await api("GET", `/api/public/packages/${live.slug}`)).status, 404);
+  assert.equal((await api("GET", `/api/admin/packages/${elsewhere.id}`, { token })).status, 200);
+  const deleted = await AuditLog.find({ action: "PACKAGE_DELETED", entityId: { $in: [live.id, draft.id] } }).lean<{ metadata: { destination: string } }[]>();
+  assert.deepEqual(deleted.map((row) => row.metadata.destination), ["batumi", "batumi"]);
+  // Its activity stays, unlinked; the links to its page are gone (the first homepage button goes back to its default).
+  assert.equal((await api("GET", `/api/admin/activities/${addOn.id}`, { token })).body.data.destinationId, null);
+  const after = (await api("GET", "/api/admin/content", { token })).body.data;
+  assert.deepEqual(after.navigation, nav);
+  assert.deepEqual(after["home.hero"].primaryCta, { label: "Explore packages", href: "#branches" });
+  assert.deepEqual(after["home.hero"].secondaryCta, hero.secondaryCta, "a link to another page stays");
+  await api("PUT", "/api/admin/content/home.hero", { token, body: content["home.hero"] });
+
+  // The name can be used again, and no package can be added to the deleted destination.
+  assert.equal((await api("POST", "/api/admin/destinations", { token, body: { name: "Batumi", countryCode: "GE", countryName: "Georgia" } })).body.data.slug, "batumi");
+  const late = await api("POST", "/api/admin/packages", { token, body: { branchId: ids.branchId, destinationId: destination.id, title: "Too late", durationDays: 2, durationNights: 1 } });
+  assert.equal(late.status, 400, JSON.stringify(late.body));
+  // Deleted packages (including the one deleted earlier) still point at an existing document.
   assert.deepEqual(await danglingReferences(), []);
 });
 

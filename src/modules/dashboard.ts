@@ -18,7 +18,7 @@ export const dashboardRoutes = new Hono<AppEnv>().get("/", async (c) => {
       Package.countDocuments({ ...livePackages, status: "PUBLISHED" }),
       Package.countDocuments({ ...livePackages, status: "DRAFT" }),
       Branch.countDocuments(),
-      Destination.countDocuments(),
+      Destination.countDocuments({ deletedAt: null }),
       Testimonial.countDocuments({ deletedAt: null, isPublished: true }),
       Enquiry.countDocuments({ status: "NEW" }),
       Enquiry.find({}, { name: 1, status: 1, createdAt: 1, packageId: 1, adults: 1, children: 1, infants: 1 }).sort({ createdAt: -1 }).limit(5).lean<EnquiryDoc[]>(),

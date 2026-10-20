@@ -1,10 +1,13 @@
 import { z } from "zod";
-import { Activity, Destination, Media, Package, withId, type ActivityDoc, type DestinationDoc } from "../db/models.ts";
+import { Activity, Destination, Media, Package, withId, type ActivityDoc, type DestinationDoc, type PackageDoc } from "../db/models.ts";
 import { notFound } from "../lib/errors.ts";
+import { idParam, ok, type AdminContext } from "../lib/http.ts";
 import { publishedCounts } from "./branches.ts";
 import { activityDtos } from "./catalog.ts";
+import { contentLinksTo, removeContentLinksTo } from "./content.ts";
 import { crudRoutes, nullableText, optionalId } from "./crud.ts";
 import { loadImages, type ImageDto } from "./media/dto.ts";
+import { markPackageDeleted } from "./packages/delete.ts";
 import { refreshSearchText } from "./packages/search-text.ts";
 import { seoDto, seoInput, slugInput, uniqueSlug, withImages } from "./shared.ts";
 
@@ -31,6 +34,45 @@ const destinationInput = z
   })
   .extend(seoInput.shape);
 
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+const pagePath = (slug: string) => `/destinations/${slug}`;
+
+/** What deleting a destination also changes, listed in the admin's confirmation before anything happens. */
+async function deletionEffects(id: string) {
+  const destination = await Destination.findOne({ _id: id, deletedAt: null }).lean<DestinationDoc>();
+  if (!destination) throw notFound("Destination");
+  const packages = await Package.find({ destinationId: id, deletedAt: null }, { title: 1, status: 1 }).sort({ title: 1 }).lean<Pick<PackageDoc, "title" | "status">[]>();
+  const activities = await Activity.find({ destinationId: id }, { name: 1 }).sort({ name: 1 }).lean<Pick<ActivityDoc, "name">[]>();
+  const links = await contentLinksTo(pagePath(destination.slug));
+  return [
+    packages.length && {
+      summary: `${plural(packages.length, "package", "packages")} going there will be deleted too and leave the website:`,
+      items: packages.map((pkg) => `${pkg.title} (${pkg.status.toLowerCase()})`),
+      note: "To keep a package, move it to another destination in its Details tab first.",
+    },
+    activities.length && {
+      summary: `${plural(activities.length, "activity stays", "activities stay")}, no longer linked to a destination:`,
+      items: activities.map((activity) => activity.name),
+    },
+    links.length && { summary: "Links to its page are removed from Global content:", items: links },
+  ].filter(Boolean);
+}
+
+/**
+ * Deleting a destination takes what depends on it along, inside the delete's transaction, so nothing is left
+ * pointing at a page that is gone: its packages are deleted (as with a package's own Delete), its add-on activities
+ * unlinked, links to its page taken out of the site content. The destination itself is soft-deleted and its slug
+ * released, so deleted packages and old enquiries keep a valid reference and the name can be used again.
+ */
+async function deleteDestination(id: string, admin: AdminContext) {
+  const destination = (await Destination.findById(id).lean<DestinationDoc>())!;
+  const packages = (await Package.find({ destinationId: id, deletedAt: null }, { slug: 1, status: 1 }).lean<Pick<PackageDoc, "_id" | "slug" | "status">[]>()).map(withId);
+  for (const pkg of packages) await markPackageDeleted(pkg, admin, { destination: destination.slug });
+  await Activity.updateMany({ destinationId: id }, { $set: { destinationId: null } });
+  await removeContentLinksTo(pagePath(destination.slug), admin);
+  await Destination.updateOne({ _id: id }, { $set: { isActive: false, slug: `${destination.slug}-deleted-${Date.now().toString(36)}` } });
+}
+
 export const destinationAdminRoutes = crudRoutes({
   entity: "destination",
   label: "Destination",
@@ -46,14 +88,12 @@ export const destinationAdminRoutes = crudRoutes({
   },
   prepare: async (data, existing) => (!existing && !data.slug ? { ...data, slug: await uniqueSlug(Destination, data.name) } : data),
   refs: { heroImageId: Media, thumbnailImageId: Media, ogImageId: Media },
-  inUse: async (id) => !!(await Package.exists({ destinationId: id })),
-  onDelete: async (id) => {
-    await Activity.updateMany({ destinationId: id }, { $set: { destinationId: null } });
-  },
+  softDelete: true,
+  onDelete: deleteDestination,
   afterSave: (id) => refreshSearchText({ destinationId: id }),
   tags: ["catalog"],
   orderable: true,
-});
+}).get("/:id/delete-check", async (c) => ok(c, { effects: await deletionEffects(idParam(c)) }));
 
 // ---------------------------------------------------------------------------------------------
 // Public

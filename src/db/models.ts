@@ -157,6 +157,8 @@ export interface BranchDoc extends Seo, Timestamps {
   latitude: number | null;
   longitude: number | null;
   mapUrl: string | null;
+  /** The currency this branch's packages are priced and shown in; null: its country's (see branchCurrency). */
+  currencyCode: string | null;
   displayOrder: number;
   isActive: boolean;
 }
@@ -340,6 +342,29 @@ export interface TestimonialDoc extends Timestamps {
   displayOrder: number;
   isPublished: boolean;
   deletedAt: Date | null;
+}
+
+/**
+ * A review from GETSET's Google Business Profiles, as last read from Google (src/modules/google-reviews.ts). Google
+ * allows keeping the content 30 days: each sync rewrites it, and a review not read again within 30 days is deleted.
+ */
+export interface GoogleReviewDoc extends Timestamps {
+  _id: string;
+  /** Google's id for the review: one document per review, however often it is synced. */
+  reviewId: string;
+  /** The profile it was left on ("accounts/.../locations/..."). */
+  location: string;
+  /** Null for an anonymous reviewer. */
+  author: string | null;
+  photoUrl: string | null;
+  rating: number;
+  /** As written on Google ("" for a rating without words). */
+  text: string;
+  createTime: Date;
+  /** The package it is about, set in the admin; null keeps it a general review. */
+  packageId: string | null;
+  /** When it was last read from Google. */
+  syncedAt: Date;
 }
 
 export interface HeroSlideDoc extends Timestamps {
@@ -538,6 +563,7 @@ const branchSchema = new Schema<BranchDoc>(
     latitude: { type: Number, default: null },
     longitude: { type: Number, default: null },
     mapUrl: text(false),
+    currencyCode: { type: String, default: null, match: /^[A-Z]{3}$/ },
     displayOrder,
     isActive: flag(true),
     ...seo,
@@ -756,6 +782,26 @@ const testimonialSchema = new Schema<TestimonialDoc>(
 );
 testimonialSchema.index({ isPublished: 1, displayOrder: 1 });
 
+const googleReviewSchema = new Schema<GoogleReviewDoc>(
+  {
+    _id: uuid,
+    reviewId: text(),
+    location: text(),
+    author: text(false),
+    photoUrl: text(false),
+    rating: { type: Number, required: true, min: 1, max: 5 },
+    text: textDefault(),
+    createTime: { type: Date, required: true },
+    packageId: ref,
+    syncedAt: { type: Date, required: true },
+  },
+  options("google_reviews"),
+);
+googleReviewSchema.index({ reviewId: 1 }, { unique: true });
+googleReviewSchema.index({ packageId: 1, createTime: -1 });
+googleReviewSchema.index({ createTime: -1 });
+googleReviewSchema.index({ syncedAt: 1 });
+
 const heroSlideSchema = new Schema<HeroSlideDoc>(
   {
     _id: uuid,
@@ -833,6 +879,7 @@ export const Activity = mongoose.model<ActivityDoc>("Activity", activitySchema);
 export const Package = mongoose.model<PackageDoc>("Package", packageSchema);
 export const ItineraryPdf = mongoose.model<ItineraryPdfDoc>("ItineraryPdf", itineraryPdfSchema);
 export const Testimonial = mongoose.model<TestimonialDoc>("Testimonial", testimonialSchema);
+export const GoogleReview = mongoose.model<GoogleReviewDoc>("GoogleReview", googleReviewSchema);
 export const HeroSlide = mongoose.model<HeroSlideDoc>("HeroSlide", heroSlideSchema);
 export const SiteContent = mongoose.model<SiteContentDoc>("SiteContent", siteContentSchema);
 export const Enquiry = mongoose.model<EnquiryDoc>("Enquiry", enquirySchema);
@@ -852,6 +899,7 @@ export const ALL_MODELS: Model<any>[] = [
   Package,
   ItineraryPdf,
   Testimonial,
+  GoogleReview,
   HeroSlide,
   SiteContent,
   Enquiry,
@@ -898,6 +946,7 @@ export const REFERENCES: { from: Model<any>; path: string; to: Model<any> }[] = 
   { from: ItineraryPdf, path: "generatedById", to: AdminUser },
   { from: Testimonial, path: "imageId", to: Media },
   { from: Testimonial, path: "packageId", to: Package },
+  { from: GoogleReview, path: "packageId", to: Package },
   { from: HeroSlide, path: "imageId", to: Media },
   { from: SiteContent, path: "updatedById", to: AdminUser },
   { from: Enquiry, path: "branchId", to: Branch },

@@ -3,7 +3,7 @@ import { Media, Package, Testimonial, withId, type TestimonialDoc } from "../db/
 import { pageMeta } from "../lib/http.ts";
 import { crudRoutes, nullableText, optionalId } from "./crud.ts";
 import { loadImages, type ImageDto } from "./media/dto.ts";
-import { withImages } from "./shared.ts";
+import { packageTitles, withImages } from "./shared.ts";
 
 type TestimonialRow = Omit<TestimonialDoc, "_id"> & { id: string };
 
@@ -39,8 +39,8 @@ export const testimonialAdminRoutes = crudRoutes({
     /^[1-5]$/.test(query.rating ?? "") ? { rating: Number(query.rating) } : undefined,
   ],
   toDto: async (rows) => {
-    const image = await loadImages(rows.map((row) => row.imageId));
-    return rows.map((row) => withImages(row, image));
+    const [image, title] = await Promise.all([loadImages(rows.map((row) => row.imageId)), packageTitles(rows.map((row) => row.packageId))]);
+    return rows.map((row) => ({ ...withImages(row, image), packageTitle: title(row.packageId) }));
   },
   refs: { imageId: Media, packageId: Package },
   softDelete: true,

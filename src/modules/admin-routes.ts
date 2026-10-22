@@ -9,6 +9,7 @@ import { currencyAdminRoutes } from "./currencies.ts";
 import { auditLogRoutes, dashboardRoutes } from "./dashboard.ts";
 import { destinationAdminRoutes } from "./destinations.ts";
 import { enquiryAdminRoutes } from "./enquiries.ts";
+import { googleReviewAdminRoutes } from "./google-reviews.ts";
 import { heroSlideAdminRoutes } from "./hero-slides.ts";
 import { mediaAdminRoutes } from "./media/routes.ts";
 import { packageAdminRoutes } from "./packages/routes.ts";
@@ -29,6 +30,7 @@ export const adminRoutes = new Hono<AppEnv>()
   .route("/activities", activityAdminRoutes)
   .route("/currencies", currencyAdminRoutes)
   .route("/testimonials", testimonialAdminRoutes)
+  .route("/google-reviews", googleReviewAdminRoutes)
   .route("/hero-slides", heroSlideAdminRoutes)
   .route("/content", contentAdminRoutes)
   .route("/media", mediaAdminRoutes)

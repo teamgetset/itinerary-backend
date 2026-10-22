@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { Branch, Enquiry, Media, Package, withId, type BranchDoc } from "../db/models.ts";
+import { Branch, Currency, Enquiry, Media, Package, withId, type BranchDoc } from "../db/models.ts";
 import { notFound } from "../lib/errors.ts";
 import { crudRoutes, nullableText, optionalId } from "./crud.ts";
+import { branchCurrency } from "./currencies.ts";
 import { loadImages, type ImageDto } from "./media/dto.ts";
 import { seoDto, seoInput, slugInput, uniqueSlug, withImages } from "./shared.ts";
 
@@ -27,6 +28,8 @@ const branchInput = z
     latitude: z.number().min(-90).max(90).nullish(),
     longitude: z.number().min(-180).max(180).nullish(),
     mapUrl: z.url().max(500).nullish(),
+    /** The currency its packages are priced in (one of the site's currencies). */
+    currencyCode: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "A currency code, e.g. AED").optional(),
     displayOrder: z.number().int().min(0).optional(),
     isActive: z.boolean().optional(),
   })
@@ -42,10 +45,11 @@ export const branchAdminRoutes = crudRoutes({
   sort: { displayOrder: 1, name: 1 },
   toDto: async (rows) => {
     const image = await loadImages(rows.flatMap((row) => [row.bannerImageId, row.thumbnailImageId, row.ogImageId]));
-    return rows.map((row) => withImages(row, image));
+    // The currency in force, also for branches saved before they had one, so the form shows (and keeps) it.
+    return rows.map((row) => ({ ...withImages(row, image), currencyCode: branchCurrency(row as unknown as BranchRow) }));
   },
   prepare: async (data, existing) => (!existing && !data.slug ? { ...data, slug: await uniqueSlug(Branch, data.name) } : data),
-  refs: { bannerImageId: Media, thumbnailImageId: Media, ogImageId: Media },
+  refs: { bannerImageId: Media, thumbnailImageId: Media, ogImageId: Media, currencyCode: Currency },
   // Every package (also archived and deleted ones) keeps its branch: a branch with packages can only be switched off.
   inUse: async (id) => !!(await Package.exists({ branchId: id })),
   onDelete: async (id) => {

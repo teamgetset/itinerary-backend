@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AppError, notFound } from "../lib/errors.ts";
-import { activeCurrencies } from "./currencies.ts";
+import { branchCurrency } from "./currencies.ts";
 import { getPublicPackage, priceTable, type PriceTable } from "./packages/read.ts";
 
 /*
@@ -40,13 +40,14 @@ export const travellersInput = z.object({
 
 export const quoteInput = travellersInput.extend({
   packageSlug: z.string().min(1).max(120),
-  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/),
+  /** Ignored: a package is quoted in its branch's currency (kept so older callers still validate). */
+  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional(),
 });
 
+/** The trip total in the package's currency (its branch's: Dubai AED, Calicut INR). */
 export async function quote(input: z.infer<typeof quoteInput>) {
   const graph = await getPublicPackage(input.packageSlug);
   if (!graph) throw notFound("Package");
-  const codes = new Set((await activeCurrencies()).map((currency) => currency.code));
-  if (!codes.has(input.currency)) throw new AppError(400, "UNSUPPORTED_CURRENCY", `${input.currency} is not offered`);
-  return { packageSlug: graph.slug, ...calculateTotal(priceTable(graph.prices, codes), input.currency, input) };
+  const currency = branchCurrency(graph.branch);
+  return { packageSlug: graph.slug, ...calculateTotal(priceTable(graph.prices, new Set([currency])), currency, input) };
 }

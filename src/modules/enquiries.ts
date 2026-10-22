@@ -8,7 +8,7 @@ import { log } from "../lib/logger.ts";
 import { rateLimiter } from "../lib/rate-limit.ts";
 import { contains } from "../lib/text.ts";
 import { audit } from "./audit.ts";
-import { activeCurrencies } from "./currencies.ts";
+import { branchCurrency } from "./currencies.ts";
 import { getPublicPackage, priceTable } from "./packages/read.ts";
 import { calculateTotal, travellersInput } from "./pricing.ts";
 
@@ -61,14 +61,13 @@ export async function createEnquiry(input: z.infer<typeof enquiryInput>, ip: str
     if (!graph) throw notFound("Package");
     packageId = graph.id;
     branchId = graph.branchId;
-    const codes = new Set((await activeCurrencies()).map((currency) => currency.code));
-    if (input.currency && codes.has(input.currency)) {
-      try {
-        estimatedTotal = calculateTotal(priceTable(graph.prices, codes), input.currency, input).total;
-        currencyCode = input.currency;
-      } catch {
-        // No price for that traveller mix: keep the enquiry, staff will quote.
-      }
+    // Estimated in the package's currency (its branch's), whatever the page sent.
+    const currency = branchCurrency(graph.branch);
+    try {
+      estimatedTotal = calculateTotal(priceTable(graph.prices, new Set([currency])), currency, input).total;
+      currencyCode = currency;
+    } catch {
+      // No price for that traveller mix: keep the enquiry, staff will quote.
     }
   } else if (input.branchSlug) {
     const branch = await Branch.findOne({ slug: input.branchSlug }, { _id: 1 }).lean<{ _id: string }>();

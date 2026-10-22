@@ -16,6 +16,7 @@
     "db:verify": "tsx src/scripts/db-verify.ts",
     "db:seed": "tsx src/scripts/seed.ts",
     "search:reindex": "tsx src/scripts/search-reindex.ts",
+    "google:business": "tsx src/scripts/google-business.ts",
     "admin:create": "tsx src/scripts/create-admin.ts",
     "admin:credentials": "tsx src/scripts/set-admin-credentials.ts",
     "migrate:pg-to-mongo": "tsx src/scripts/migrate-pg-to-mongo.ts",

@@ -154,7 +154,10 @@ export async function readyPackage(
   });
   if (created.status !== 201) throw new Error(`create failed: ${JSON.stringify(created.body)}`);
   const id = created.body.data.id as string;
-  await api("PUT", `/api/admin/packages/${id}/prices`, { token, body: { prices: FULL_PRICES } });
+  // A package is priced in its branch's currency only (the test Dubai branch: AED; Calicut: INR).
+  const prices = FULL_PRICES.filter((price) => price.currencyCode === created.body.data.currency);
+  const priced = await api("PUT", `/api/admin/packages/${id}/prices`, { token, body: { prices } });
+  if (priced.status !== 200) throw new Error(`prices failed: ${JSON.stringify(priced.body)}`);
   await api("PUT", `/api/admin/packages/${id}/itinerary`, {
     token,
     body: {

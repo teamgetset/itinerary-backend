@@ -89,10 +89,30 @@ const schema = z
     SUPPORTED_CURRENCIES: list.default(["INR", "AED"]),
     /** Fallback WhatsApp number (international format, digits only) when a branch has none. */
     WHATSAPP_NUMBER: optional(z.string().regex(/^\d{8,15}$/)),
+
+    /**
+     * Google reviews on the website, read with the Google Business Profile API (see README, "Google reviews"): an OAuth
+     * client, the profile owner's refresh token (secret, server only, never logged) and the profiles to show, as
+     * accounts/<id>/locations/<id>, comma-separated. All four or none; none means no Google reviews.
+     */
+    GOOGLE_OAUTH_CLIENT_ID: optional(z.string().trim().min(1)),
+    GOOGLE_OAUTH_CLIENT_SECRET: optional(z.string().trim().min(1)),
+    GOOGLE_OAUTH_REFRESH_TOKEN: optional(z.string().trim().min(1)),
+    GOOGLE_BUSINESS_LOCATIONS: z.preprocess(
+      (value) => (typeof value === "string" ? value.split(",").map((item) => item.trim()).filter(Boolean) : []),
+      z.array(z.string().regex(/^accounts\/\d+\/locations\/\d+$/, "accounts/<id>/locations/<id>, as npm run google:business -- locations prints")),
+    ),
   })
   .refine((env) => env.SUPPORTED_CURRENCIES.includes(env.DEFAULT_CURRENCY), {
     message: "DEFAULT_CURRENCY must be one of SUPPORTED_CURRENCIES",
     path: ["DEFAULT_CURRENCY"],
+  })
+  .superRefine((env, ctx) => {
+    const google = ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_OAUTH_REFRESH_TOKEN"] as const;
+    if (google.some((name) => env[name]) || env.GOOGLE_BUSINESS_LOCATIONS.length) {
+      for (const name of google) if (!env[name]) ctx.addIssue({ code: "custom", path: [name], message: "required with the other GOOGLE_* variables" });
+      if (!env.GOOGLE_BUSINESS_LOCATIONS.length) ctx.addIssue({ code: "custom", path: ["GOOGLE_BUSINESS_LOCATIONS"], message: "required with the other GOOGLE_* variables" });
+    }
   })
   .superRefine((env, ctx) => {
     if (env.STORAGE_PROVIDER !== "cloudinary") return;

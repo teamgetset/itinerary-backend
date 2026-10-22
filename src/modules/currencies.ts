@@ -47,6 +47,17 @@ export const currencyDto = (row: CurrencyRow) => ({
   isActive: row.isActive,
 });
 
+// ponytail: the countries GETSET has offices in, for branches saved before they had a currency; a branch anywhere
+// else has its currency set in the admin.
+const COUNTRY_CURRENCY: Record<string, string> = { AE: "AED", IN: "INR" };
+
+/**
+ * The one currency a branch's packages are priced in, entered in and shown in: the branch's own setting, else its
+ * country's (Dubai AED, Calicut INR), else the default currency. Nothing is converted.
+ */
+export const branchCurrency = (branch: { currencyCode?: string | null; countryCode: string }) =>
+  branch.currencyCode ?? COUNTRY_CURRENCY[branch.countryCode] ?? env.DEFAULT_CURRENCY;
+
 export async function activeCurrencies() {
   return (await Currency.find({ isActive: true }).sort({ displayOrder: 1, _id: 1 }).lean<CurrencyDoc[]>()).map(toRow);
 }

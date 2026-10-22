@@ -19,7 +19,8 @@ export interface CrudConfig<Create extends z.ZodType, Update extends z.ZodType> 
   entity: string;
   label: string;
   model: Model<any>;
-  create: Create;
+  /** Without it there is no POST: the rows arrive another way (Google reviews are synced). */
+  create?: Create;
   update: Update;
   /** Fields matched (case-insensitive, contains) by ?q=. */
   search?: string[];
@@ -41,7 +42,8 @@ export interface CrudConfig<Create extends z.ZodType, Update extends z.ZodType> 
   /** Clears links to a deleted document (what ON DELETE SET NULL did). Runs inside the delete's transaction, soft or not. */
   onDelete?: (id: string, admin: AdminContext) => Promise<void>;
   tags: CacheTag[];
-  roles?: { write?: AdminRole; delete?: AdminRole };
+  /** `delete: null` leaves out DELETE. */
+  roles?: { write?: AdminRole; delete?: AdminRole | null };
   /** Adds PUT /order to save a drag-and-drop order into displayOrder. */
   orderable?: boolean;
 }
@@ -49,7 +51,7 @@ export interface CrudConfig<Create extends z.ZodType, Update extends z.ZodType> 
 export function crudRoutes<Create extends z.ZodType, Update extends z.ZodType>(config: CrudConfig<Create, Update>) {
   const { model, entity, label } = config;
   const write = requireRole(config.roles?.write ?? "EDITOR");
-  const remove = requireRole(config.roles?.delete ?? "ADMIN");
+  const removeRole = config.roles?.delete === undefined ? "ADMIN" : config.roles.delete;
   const listQuery = pageQuery.extend({ q: z.string().trim().max(100).optional() }).loose();
   const ACTION = entity.toUpperCase();
   const live: Filter = config.softDelete ? { deletedAt: null } : {};
@@ -90,21 +92,6 @@ export function crudRoutes<Create extends z.ZodType, Update extends z.ZodType>(c
       return ok(c, await config.toDto(rows.map(withId)), pageMeta(query.page, query.pageSize, total));
     })
     .get("/:id", async (c) => ok(c, await one(await findRow(idParam(c)))))
-    .post("/", write, async (c) => {
-      const input = (await readBody(c, config.create)) as Row;
-      const data = config.prepare ? await config.prepare(input, null) : input;
-      await checkReferences(data);
-      const admin = c.get("admin");
-      const row = await transaction(async () => {
-        const [created] = await model.create([defined(data)]);
-        const id = created!._id as string;
-        await config.afterSave?.(id, data);
-        await audit(admin, `${ACTION}_CREATED`, entity, id);
-        return withId(created!.toObject() as Row & { _id: string });
-      });
-      revalidate(...config.tags);
-      return ok(c, await one(row), undefined, 201);
-    })
     .patch("/:id", write, async (c) => {
       const id = idParam(c);
       const existing = await findRow(id);
@@ -125,8 +112,29 @@ export function crudRoutes<Create extends z.ZodType, Update extends z.ZodType>(c
       });
       revalidate(...config.tags);
       return ok(c, await one(row));
-    })
-    .delete("/:id", remove, async (c) => {
+    });
+
+  const { create } = config;
+  if (create) {
+    router.post("/", write, async (c) => {
+      const input = (await readBody(c, create)) as Row;
+      const data = config.prepare ? await config.prepare(input, null) : input;
+      await checkReferences(data);
+      const admin = c.get("admin");
+      const row = await transaction(async () => {
+        const [created] = await model.create([defined(data)]);
+        const id = created!._id as string;
+        await config.afterSave?.(id, data);
+        await audit(admin, `${ACTION}_CREATED`, entity, id);
+        return withId(created!.toObject() as Row & { _id: string });
+      });
+      revalidate(...config.tags);
+      return ok(c, await one(row), undefined, 201);
+    });
+  }
+
+  if (removeRole) {
+    router.delete("/:id", requireRole(removeRole), async (c) => {
       const id = idParam(c);
       await findRow(id);
       const admin = c.get("admin");
@@ -144,6 +152,7 @@ export function crudRoutes<Create extends z.ZodType, Update extends z.ZodType>(c
       revalidate(...config.tags);
       return ok(c, { id, deleted: true });
     });
+  }
 
   if (config.orderable) {
     router.put("/order", write, async (c) => {

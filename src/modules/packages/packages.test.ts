@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AuditLog } from "../../db/models.ts";
+import { AuditLog, Package } from "../../db/models.ts";
 import { signToken } from "../../lib/crypto.ts";
 import { FULL_PRICES, api, catalogue, readyPackage, signIn } from "../../test/helpers.ts";
 
@@ -236,21 +236,33 @@ test("hotel options: every field is optional; empty rows are dropped; a row with
   assert.deepEqual((await api("GET", `/api/public/packages/${pkg.slug}`)).body.data.hotels, []);
 });
 
-test("pricing: adult, child and infant in INR and AED; negatives and unknown currencies refused", async () => {
+test("pricing: in the branch's currency only (Dubai AED); prices kept in another currency survive; others refused", async () => {
   const pkg = await readyPackage(token, ids, { title: "Pricing Trip" });
   const editor = (await api("GET", `/api/admin/packages/${pkg.id}`, { token })).body.data;
-  assert.equal(editor.prices.length, 6);
+  assert.equal(editor.currency, "AED");
+  assert.equal(editor.prices.length, 3);
+
+  // An INR price from before prices followed the branch: saving the AED prices leaves it as it is.
+  await Package.updateOne({ _id: pkg.id }, { $push: { prices: { currencyCode: "INR", priceType: "ADULT", amount: 54999 } } });
+  const saved = await api("PUT", `/api/admin/packages/${pkg.id}/prices`, { token, body: { prices: [{ currencyCode: "AED", priceType: "ADULT", amount: 2600 }] } });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.deepEqual(
+    saved.body.data.prices.map((p: { currencyCode: string; amount: number }) => `${p.currencyCode} ${p.amount}`).sort(),
+    ["AED 2600", "INR 54999"],
+  );
+  const listed = (await api("GET", "/api/admin/packages?q=pricing%20trip", { token })).body.data[0];
+  assert.deepEqual([listed.currency, listed.startingPrice], ["AED", { AED: 2600 }], "the admin shows only the branch's currency");
 
   const negative = await api("PUT", `/api/admin/packages/${pkg.id}/prices`, {
     token,
-    body: { prices: [{ currencyCode: "INR", priceType: "ADULT", amount: -1 }] },
+    body: { prices: [{ currencyCode: "AED", priceType: "ADULT", amount: -1 }] },
   });
-  assert.equal(negative.body.error.details[0].message, "Adult INR price cannot be negative.");
-  const unknown = await api("PUT", `/api/admin/packages/${pkg.id}/prices`, {
-    token,
-    body: { prices: [{ currencyCode: "XYZ", priceType: "ADULT", amount: 10 }] },
-  });
-  assert.equal(unknown.body.error.details[0].message, "XYZ is not a supported currency.");
+  assert.equal(negative.body.error.details[0].message, "Adult AED price cannot be negative.");
+  for (const currencyCode of ["INR", "XYZ"]) {
+    const other = await api("PUT", `/api/admin/packages/${pkg.id}/prices`, { token, body: { prices: [{ currencyCode, priceType: "ADULT", amount: 10 }] } });
+    assert.equal(other.status, 400);
+    assert.equal(other.body.error.details[0].message, "Dubai packages are priced in AED.");
+  }
   const twice = await api("PUT", `/api/admin/packages/${pkg.id}/prices`, {
     token,
     body: { prices: [FULL_PRICES[0], FULL_PRICES[0]] },
@@ -268,7 +280,7 @@ test("publishing is allowed with an incomplete checklist; the checklist still sa
   assert.equal(check.body.data.ready, false);
   const failing = check.body.data.checklist.filter((i: { ok: boolean }) => !i.ok);
   assert.deepEqual(failing.map((i: { key: string }) => i.key), ["heroImage", "description", "pricing", "itinerary", "itineraryPdf"]);
-  assert.match(failing.find((i: { key: string }) => i.key === "pricing").message, /Adult INR, Child INR, Infant INR, Adult AED, Child AED, Infant AED/);
+  assert.equal(failing.find((i: { key: string }) => i.key === "pricing").message, "Missing: Adult AED, Child AED, Infant AED.", "only the branch's currency");
 
   // Publishing is not blocked; what was missing is recorded with it.
   const publish = await api("POST", `/api/admin/packages/${id}/publish`, { token });
@@ -304,7 +316,8 @@ test("publish, unpublish, archive: public visibility follows status; the uploade
 
   const detail = await api("GET", `/api/public/packages/${pkg.slug}`);
   assert.equal(detail.status, 200);
-  assert.deepEqual(detail.body.data.prices.ADULT, { INR: 54999, AED: 2450 });
+  assert.equal(detail.body.data.currency, "AED", "a Dubai package is shown in AED");
+  assert.deepEqual(detail.body.data.prices.ADULT, { AED: 2450 });
   assert.deepEqual(detail.body.data.overview, ["First paragraph.", "Second paragraph."]);
   assert.equal(detail.body.data.itinerary[0].activities[0].time, "10:30");
   assert.equal(detail.body.data.branch.slug, "dubai");
@@ -368,7 +381,7 @@ test("duplicate: a new draft with the same itinerary, prices and lists", async (
   assert.equal(copy.body.data.status, "DRAFT");
   assert.equal(copy.body.data.itinerary.length, 3);
   assert.equal(copy.body.data.itinerary[0].activities[0].title, "Airport arrival");
-  assert.equal(copy.body.data.prices.length, 6);
+  assert.equal(copy.body.data.prices.length, 3);
   assert.equal(copy.body.data.highlights[0].title, "Old Tbilisi");
 });
 
@@ -381,10 +394,12 @@ test("listing: filters by branch, destination, duration, price range in a curren
     durationDays: 3,
     keywords: ["honeymoon"],
   });
-  await api("PUT", `/api/admin/packages/${maldives.id}/prices`, {
+  // Calicut packages are priced in INR.
+  const doubled = await api("PUT", `/api/admin/packages/${maldives.id}/prices`, {
     token,
-    body: { prices: FULL_PRICES.map((p) => ({ ...p, amount: p.amount * 2 })) },
+    body: { prices: FULL_PRICES.filter((p) => p.currencyCode === "INR").map((p) => ({ ...p, amount: p.amount * 2 })) },
   });
+  assert.equal(doubled.status, 200, JSON.stringify(doubled.body));
   for (const pkg of [georgia, maldives]) await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token });
 
   const slugs = async (query: string) =>
@@ -394,8 +409,15 @@ test("listing: filters by branch, destination, duration, price range in a curren
   assert.equal((await slugs("branch=dubai")).includes("filter-maldives"), false);
   assert.deepEqual(await slugs("branch=calicut"), ["filter-maldives"]);
   assert.deepEqual(await slugs("destination=male"), ["filter-maldives"]);
-  assert.deepEqual(await slugs("currency=AED&minPrice=3000"), ["filter-maldives"]);
-  assert.ok((await slugs("currency=INR&maxPrice=60000")).includes("filter-georgia"));
+  // A price range is in one currency, so it covers the packages priced in it: never a Dubai (AED) package in INR.
+  assert.deepEqual(await slugs("currency=INR&minPrice=100000"), ["filter-maldives"]);
+  assert.ok((await slugs("currency=AED&maxPrice=3000")).includes("filter-georgia"));
+  assert.equal((await slugs("currency=INR&maxPrice=1000000")).includes("filter-georgia"), false);
+  const cards = (await api("GET", "/api/public/packages?slugs=filter-maldives,filter-georgia")).body.data;
+  assert.deepEqual(
+    cards.map((p: { slug: string; currency: string; startingPrice: Record<string, number> }) => [p.slug, p.currency, p.startingPrice]).sort(),
+    [["filter-georgia", "AED", { AED: 2450 }], ["filter-maldives", "INR", { INR: 109998 }]],
+  );
   assert.deepEqual(await slugs("slugs=filter-maldives,filter-georgia"), ["filter-georgia", "filter-maldives"]);
   assert.deepEqual(await slugs("minDays=30"), []);
 
@@ -527,7 +549,8 @@ test("admin list: search by title, destination or branch, filter by status", asy
   const list = await api("GET", "/api/admin/packages?q=georgia&status=PUBLISHED", { token });
   assert.ok(list.body.data.length > 0);
   assert.ok(list.body.data.every((p: { status: string }) => p.status === "PUBLISHED"));
-  assert.ok(list.body.data[0].startingPrice.INR > 0);
+  assert.equal(list.body.data[0].currency, "AED");
+  assert.ok(list.body.data[0].startingPrice.AED > 0);
   const byBranch = await api("GET", `/api/admin/packages?branchId=${ids.otherBranchId}`, { token });
   assert.ok(byBranch.body.data.every((p: { branch: { id: string } }) => p.branch.id === ids.otherBranchId));
 });

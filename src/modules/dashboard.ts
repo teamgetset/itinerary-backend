@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { AdminUser, AuditLog, Branch, Destination, Enquiry, Package, Testimonial, defined, type AuditLogDoc, type EnquiryDoc } from "../db/models.ts";
 import { ok, pageMeta, pageQuery, readQuery, type AppEnv } from "../lib/http.ts";
+import { googleReviewsStatus } from "./google-reviews.ts";
 
 /** Admin names by id, for "who did this" columns. */
 async function adminNames(ids: (string | null)[]) {
@@ -44,6 +45,7 @@ export const dashboardRoutes = new Hono<AppEnv>().get("/", async (c) => {
     })),
     recentPackages: recentPackages.map((p) => ({ id: p._id, title: p.title, status: p.status, updatedAt: p.updatedAt })),
     activity: logs.map((log) => ({ action: log.action, entity: log.entity, entityId: log.entityId, createdAt: log.createdAt, admin: admin(log.adminUserId) })),
+    googleReviews: await googleReviewsStatus(),
   });
 });
 

@@ -23,11 +23,12 @@ import { pageMeta } from "../../lib/http.ts";
 import { escapeRegex, normalizeText } from "../../lib/text.ts";
 import { branchDto } from "../branches.ts";
 import { getContentBlock } from "../content.ts";
-import { activeCurrencies } from "../currencies.ts";
+import { branchCurrency } from "../currencies.ts";
 import { destinationDto } from "../destinations.ts";
 import { loadImages, type ImageDto } from "../media/dto.ts";
 import { PDF_VERSIONS, type PdfVersion } from "../pdf/itinerary-pdf.ts";
 import { seoDto } from "../shared.ts";
+import { googleReviewsForPackage } from "../google-reviews.ts";
 import { testimonialsForPackages } from "../testimonials.ts";
 
 export { PRICE_TYPES, type PriceType };
@@ -112,6 +113,9 @@ export async function listPublicPackages(filters: PackageFilters) {
   const { branches, destinations, categories } = await catalogLookups();
 
   const branchIds = [...branches.values()].filter((b) => !filters.branch || b.slug === filters.branch).map((b) => b.id);
+  // Each package is priced in its branch's currency only, so a price range or price order (in `currency`) covers the
+  // packages of the branches priced in it; nothing is converted.
+  const pricedIn = branchIds.filter((id) => branchCurrency(branches.get(id)!) === currency);
   const destinationIds = [...destinations.values()]
     .filter((d) => (!filters.destination || d.slug === filters.destination) && (!filters.country || d.countryCode === filters.country.toUpperCase()))
     .map((d) => d.id);
@@ -132,6 +136,7 @@ export async function listPublicPackages(filters: PackageFilters) {
     ...(filters.recommended !== undefined && { isRecommended: filters.recommended }),
     ...(filters.slugs?.length && { slug: { $in: filters.slugs } }),
     ...(priceRange && {
+      branchId: { $in: pricedIn },
       prices: {
         $elemMatch: {
           priceType: "ADULT",
@@ -158,7 +163,7 @@ export async function listPublicPackages(filters: PackageFilters) {
                   },
                 },
               },
-              in: "$$adult.amount",
+              in: { $cond: [{ $in: ["$branchId", pricedIn] }, "$$adult.amount", null] },
             },
           },
         },
@@ -190,9 +195,8 @@ type SummaryRow = {
 
 /** Card-sized package objects, with images loaded for the whole page at once. */
 export async function summaries(rows: SummaryRow[]) {
-  const [image, currencies] = await Promise.all([loadImages(rows.map((row) => row.pkg.heroImageId)), activeCurrencies()]);
-  const codes = new Set(currencies.map((currency) => currency.code));
-  return rows.map((row) => summaryDto(row, image, priceTable(row.pkg.prices, codes)));
+  const image = await loadImages(rows.map((row) => row.pkg.heroImageId));
+  return rows.map((row) => summaryDto(row, image, priceTable(row.pkg.prices, new Set([branchCurrency(row.branch)]))));
 }
 
 function summaryDto({ pkg, branch, destination, category }: SummaryRow, image: (id: string | null) => ImageDto | null, prices: PriceTable) {
@@ -216,7 +220,9 @@ function summaryDto({ pkg, branch, destination, category }: SummaryRow, image: (
     duration: { days: pkg.durationDays, nights: pkg.durationNights },
     arrival: pkg.arrivalAirportCode ? { code: pkg.arrivalAirportCode, city: pkg.arrivalCity ?? destination.name } : null,
     heroImage: image(pkg.heroImageId),
-    /** Adult price per currency: what cards show as "From". */
+    /** The one currency its prices are in: its branch's (Dubai AED, Calicut INR). */
+    currency: branchCurrency(branch),
+    /** Adult price, in that currency: what cards show as "From". */
     startingPrice: prices.ADULT,
     isFeatured: pkg.isFeatured,
     isRecommended: pkg.isRecommended,
@@ -316,13 +322,14 @@ export async function packageDetail(graph: PackageGraph) {
     ...graph.itinerary.map((day) => day.imageId),
     ...graph.itinerary.flatMap((day) => day.activities.map((entry) => entry.activity?.imageId)),
   ];
-  const [image, currencies, defaults, reviews] = await Promise.all([
+  const [image, defaults, reviews, googleReviews] = await Promise.all([
     loadImages(imageIds),
-    activeCurrencies(),
     getContentBlock("package.defaults"),
     testimonialsForPackages([graph.id]),
+    googleReviewsForPackage(graph.id),
   ]);
-  const prices = priceTable(graph.prices, new Set(currencies.map((currency) => currency.code)));
+  // Only the branch's currency; prices kept in another one (from before) stay in the database, unshown.
+  const prices = priceTable(graph.prices, new Set([branchCurrency(graph.branch)]));
 
   return {
     ...summaryDto({ pkg: graph, branch: graph.branch, destination: graph.destination, category: graph.category }, image, prices),
@@ -388,7 +395,8 @@ export async function packageDetail(graph: PackageGraph) {
     // The travel facts are part of goodToKnow above; sent empty here so no page shows them twice.
     destination: { ...destinationDto(graph.destination, image), facts: [] },
     branch: branchDto(graph.branch, image),
-    reviews: reviews.get(graph.id) ?? [],
+    // Only reviews linked to this package: those entered in the admin, then the Google ones.
+    reviews: [...(reviews.get(graph.id) ?? []), ...googleReviews],
     pdf: await pdfLink(graph, "with-logo"),
     pdfWithoutLogo: await pdfLink(graph, "without-logo"),
     seo: seoDto(graph, image),

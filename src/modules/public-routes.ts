@@ -10,6 +10,7 @@ import { getPublicBranch, listPublicBranches } from "./branches.ts";
 import { getContent } from "./content.ts";
 import { activeCurrencies, currencyDto } from "./currencies.ts";
 import { getPublicDestination, listPublicDestinations } from "./destinations.ts";
+import { publicGoogleReviews } from "./google-reviews.ts";
 import { createEnquiry, enquiryInput } from "./enquiries.ts";
 import { listPublicHeroSlides } from "./hero-slides.ts";
 import { PDF_VERSIONS, pdfHeaders, pdfNotAvailable, pdfVersion, readItineraryPdf } from "./pdf/itinerary-pdf.ts";
@@ -138,6 +139,9 @@ export const publicRoutes = new Hono<AppEnv>()
     const { items, meta } = await listPublicTestimonials(query.page, query.pageSize);
     return ok(c, items, meta);
   })
+
+  /** Reviews from GETSET's Google Business Profiles (empty, with enabled: false, until they are connected). */
+  .get("/google-reviews", async (c) => ok(c, await publicGoogleReviews()))
 
   .get("/hero-slides", async (c) => ok(c, await listPublicHeroSlides()))
 

@@ -1,5 +1,6 @@
 import type { Model } from "mongoose";
 import { z } from "zod";
+import { Package } from "../db/models.ts";
 import { SLUG_PATTERN, escapeRegex, slugSchemaMessage, slugify } from "../lib/text.ts";
 import { nullableText, optionalId } from "./crud.ts";
 import type { ImageDto } from "./media/dto.ts";
@@ -56,4 +57,12 @@ export function withImages<T extends Record<string, unknown>>(row: T, image: (id
     if (key.endsWith("ImageId") || key === "imageId") extra[key.replace(/Id$/, "")] = image((value as string) ?? null);
   }
   return { ...row, ...extra };
+}
+
+/** For admin lists: the title of each linked package ("... (deleted)" once deleted), null for none. */
+export async function packageTitles(ids: (string | null)[]) {
+  const wanted = [...new Set(ids.filter((id): id is string => !!id))];
+  const rows = wanted.length ? await Package.find({ _id: { $in: wanted } }, { title: 1, deletedAt: 1 }).lean<{ _id: string; title: string; deletedAt: Date | null }[]>() : [];
+  const titles = new Map(rows.map((row) => [row._id, row.deletedAt ? `${row.title} (deleted)` : row.title]));
+  return (id: string | null) => (id ? (titles.get(id) ?? null) : null);
 }

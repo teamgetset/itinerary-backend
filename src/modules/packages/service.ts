@@ -5,7 +5,6 @@ import {
   Activity,
   Branch,
   Category,
-  Currency,
   Destination,
   Hotel,
   Media,
@@ -23,7 +22,7 @@ import { pageMeta, type AdminContext } from "../../lib/http.ts";
 import { log } from "../../lib/logger.ts";
 import { contains } from "../../lib/text.ts";
 import { audit } from "../audit.ts";
-import { activeCurrencies } from "../currencies.ts";
+import { branchCurrency } from "../currencies.ts";
 import { loadImages } from "../media/dto.ts";
 import { itineraryPdfInfo } from "../pdf/itinerary-pdf.ts";
 import { revalidate } from "../revalidate.ts";
@@ -112,19 +111,18 @@ export async function listAdminPackages(query: z.infer<typeof adminPackageQuery>
 
   const ids = (field: "branchId" | "destinationId" | "categoryId") => [...new Set(docs.map((doc) => doc[field]).filter((id): id is string => !!id))];
   const pdfIds = docs.flatMap((doc) => [doc.itineraryPdfId, doc.itineraryPdfWithoutLogoId]).filter((id): id is string => !!id);
-  const [branches, destinations, categories, image, active, pdfs] = await Promise.all([
+  const [branches, destinations, categories, image, pdfs] = await Promise.all([
     Branch.find({ _id: { $in: ids("branchId") } }).lean<BranchDoc[]>(),
     Destination.find({ _id: { $in: ids("destinationId") } }).lean<DestinationDoc[]>(),
     Category.find({ _id: { $in: ids("categoryId") } }).lean<CategoryDoc[]>(),
     loadImages(docs.map((doc) => doc.heroImageId)),
-    activeCurrencies(),
     pdfIds.length ? Media.find({ _id: { $in: pdfIds }, deletedAt: null }, { fileName: 1, sizeBytes: 1, createdAt: 1 }).lean<MediaDoc[]>() : [],
   ]);
   const byId = <T extends { _id: string }>(rows: T[]) => new Map(rows.map((row) => [row._id, row]));
   const [branchById, destinationById, categoryById, pdfById] = [byId(branches), byId(destinations), byId(categories), byId(pdfs)];
-  const codes = new Set(active.map((currency) => currency.code));
   const items = docs.map((pkg) => {
     const branch = branchById.get(pkg.branchId)!;
+    const currency = branchCurrency(branch);
     const destination = destinationById.get(pkg.destinationId)!;
     const category = pkg.categoryId ? categoryById.get(pkg.categoryId) : undefined;
     const pdfSummary = (mediaId: string | null | undefined) => {
@@ -141,9 +139,11 @@ export async function listAdminPackages(query: z.infer<typeof adminPackageQuery>
       category: category ? { id: category._id, name: category.name } : null,
       durationDays: pkg.durationDays,
       durationNights: pkg.durationNights,
-      startingPrice: priceTable(pkg.prices, codes).ADULT,
-      /** Every price, for the admin's pricing overview. */
-      prices: priceTable(pkg.prices, codes),
+      /** Its branch's currency: the only one it is priced in. */
+      currency,
+      startingPrice: priceTable(pkg.prices, new Set([currency])).ADULT,
+      /** Every price in that currency, for the admin's pricing overview. */
+      prices: priceTable(pkg.prices, new Set([currency])),
       seo: { title: pkg.seoTitle, description: pkg.seoDescription, noindex: pkg.noindex },
       heroImage: image(pkg.heroImageId),
       itineraryPdf: pdfSummary(pkg.itineraryPdfId),
@@ -185,6 +185,8 @@ export async function packageEditorDto(graph: PackageGraph) {
   return {
     ...withImages(fields, image),
     branch: { id: branch.id, name: branch.name, slug: branch.slug },
+    /** Its branch's currency: the only one its Pricing tab asks for. */
+    currency: branchCurrency(branch),
     destination: { id: destination.id, name: destination.name, slug: destination.slug },
     category: category ? { id: category.id, name: category.name } : null,
     gallery: gallery.map((mediaId) => ({ mediaId, image: image(mediaId) })),
@@ -336,14 +338,23 @@ export async function saveItinerary(id: string, input: z.infer<typeof itineraryI
   );
 }
 
+/**
+ * A package is priced in its branch's currency only (Dubai AED, Calicut INR): this replaces the prices in that
+ * currency. Prices kept in another currency (from before, or from another branch) are left as they are, unshown.
+ */
 export async function savePrices(id: string, input: z.infer<typeof pricesInput>, admin: AdminContext) {
-  const known = new Set((await Currency.find({}, { _id: 1 }).lean<{ _id: string }[]>()).map((row) => row._id));
+  const pkg = await findPackage(id);
+  const branch = await Branch.findById(pkg.branchId).lean<BranchDoc>();
+  const currency = branchCurrency(branch!);
   input.prices.forEach((price, index) => {
-    if (!known.has(price.currencyCode)) throw fieldError(`prices.${index}.currencyCode`, `${price.currencyCode} is not a supported currency.`);
+    if (price.currencyCode !== currency) throw fieldError(`prices.${index}.currencyCode`, `${branch!.name} packages are priced in ${currency}.`);
   });
-  await replaceSection(id, admin, "pricing", () =>
-    setSection(id, { prices: input.prices.map(({ currencyCode, priceType, amount }) => ({ currencyCode, priceType, amount })) }),
-  );
+  await replaceSection(id, admin, "pricing", async () => {
+    const kept = (await Package.findById(id, { prices: 1 }).lean<Pick<PackageDoc, "prices">>())!.prices.filter((price) => price.currencyCode !== currency);
+    await setSection(id, {
+      prices: [...kept, ...input.prices].map(({ currencyCode, priceType, amount }) => ({ currencyCode, priceType, amount })),
+    });
+  });
 }
 
 export async function saveHotels(id: string, input: z.infer<typeof hotelsInput>, admin: AdminContext) {
@@ -393,11 +404,9 @@ const PRICE_LABEL = { ADULT: "Adult", CHILD: "Child", INFANT: "Infant" } as cons
 
 /** What the admin is shown as done or still missing. Guidance only: publishing never requires it (see publishPackage). */
 export async function publishChecklist(graph: PackageGraph): Promise<ChecklistItem[]> {
-  const active = await activeCurrencies();
-  const missingPrices = active.flatMap((currency) =>
-    PRICE_TYPES.filter((type) => !graph.prices.some((p) => p.currencyCode === currency.code && p.priceType === type)).map(
-      (type) => `${PRICE_LABEL[type]} ${currency.code}`,
-    ),
+  const currency = branchCurrency(graph.branch);
+  const missingPrices = PRICE_TYPES.filter((type) => !graph.prices.some((p) => p.currencyCode === currency && p.priceType === type)).map(
+    (type) => `${PRICE_LABEL[type]} ${currency}`,
   );
   const days = graph.itinerary.length;
   return [
@@ -409,7 +418,7 @@ export async function publishChecklist(graph: PackageGraph): Promise<ChecklistIt
     { key: "duration", label: "Duration", ok: graph.durationDays > 0 && graph.durationNights <= graph.durationDays },
     {
       key: "pricing",
-      label: "Pricing (adult, child and infant in every currency)",
+      label: `Pricing (adult, child and infant in ${currency})`,
       ok: missingPrices.length === 0,
       message: missingPrices.length ? `Missing: ${missingPrices.join(", ")}.` : undefined,
     },

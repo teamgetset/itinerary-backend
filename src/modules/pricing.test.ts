@@ -50,6 +50,9 @@ test("quote API: uses the published package's official prices", async () => {
   assert.equal(quote.body.data.total, 7100);
   const noAdults = await api("POST", "/api/public/pricing/quote", { body: { packageSlug: pkg.slug, currency: "INR", adults: 0, children: 1, infants: 0 } });
   assert.equal(noAdults.body.error.details[0].path, "adults");
-  const unsupported = await api("POST", "/api/public/pricing/quote", { body: { packageSlug: pkg.slug, currency: "USD", adults: 1, children: 0, infants: 0 } });
-  assert.equal(unsupported.body.error.code, "UNSUPPORTED_CURRENCY");
+  // Always in the package's currency (its branch's, AED here), whatever an older page sends.
+  for (const currency of ["INR", "USD", undefined]) {
+    const other = await api("POST", "/api/public/pricing/quote", { body: { packageSlug: pkg.slug, currency, adults: 2, children: 1, infants: 1 } });
+    assert.deepEqual([other.status, other.body.data.currency, other.body.data.total], [200, "AED", 7100], String(currency));
+  }
 });

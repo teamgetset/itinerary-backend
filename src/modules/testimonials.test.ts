@@ -72,3 +72,11 @@ test("admin filters: published, rating, place", async () => {
   const drafts = await api("GET", "/api/admin/testimonials?published=false", { token });
   assert.ok(drafts.body.data.every((t: { isPublished: boolean }) => !t.isPublished));
 });
+
+test("Google reviews: off without the GOOGLE_* settings, and nothing is asked of Google", async () => {
+  const result = await api("GET", "/api/public/google-reviews");
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.data, { enabled: false, fetchedAt: null, locations: [], reviews: [] });
+  const dashboard = await api("GET", "/api/admin/dashboard", { token });
+  assert.deepEqual(dashboard.body.data.googleReviews, { configured: false, profiles: 0, reviews: 0, locations: [], fetchedAt: null, error: null });
+});

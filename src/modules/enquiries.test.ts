@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Enquiry } from "../db/models.ts";
 import { api, catalogue, readyPackage, signIn } from "../test/helpers.ts";
 
 const { token } = await signIn("ADMIN");
@@ -9,7 +10,7 @@ await api("POST", `/api/admin/packages/${pkg.id}/publish`, { token });
 
 const base = { name: "Rahul Nair", phone: "+91 98765 43210", adults: 2, children: 1, infants: 1 };
 
-test("create: stores travellers, the package's branch and the estimate in the chosen currency", async () => {
+test("create: stores travellers, the package's branch and the estimate in the package's currency", async () => {
   const created = await api("POST", "/api/public/enquiries", {
     body: { ...base, packageSlug: pkg.slug, currency: "AED", travelDate: "2099-12-20", message: "Window seats please" },
   });
@@ -22,6 +23,12 @@ test("create: stores travellers, the package's branch and the estimate in the ch
   assert.deepEqual([detail.body.data.adults, detail.body.data.children, detail.body.data.infants], [2, 1, 1]);
   assert.equal(detail.body.data.currencyCode, "AED");
   assert.equal(detail.body.data.estimatedTotal, 2 * 2450 + 1800 + 400);
+
+  // A Dubai package is estimated in AED even when an older page sends INR.
+  const old = await api("POST", "/api/public/enquiries", { body: { ...base, name: "Old Page", packageSlug: pkg.slug, currency: "INR" } });
+  const oldDetail = (await api("GET", `/api/admin/enquiries/${old.body.data.id}`, { token })).body.data;
+  assert.deepEqual([oldDetail.currencyCode, oldDetail.estimatedTotal], ["AED", 2 * 2450 + 1800 + 400]);
+  await Enquiry.deleteOne({ _id: old.body.data.id }); // the tests below count enquiries
 });
 
 test("validation: a way to reply is required, dates must be in the future", async () => {
